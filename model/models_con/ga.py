@@ -31,8 +31,8 @@ class VQGABlock(nn.Module):
         self.seq_net = nn.Sequential(
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, 20)
-            # nn.Linear(self._ipa_conf.c_s, 22)
+            # nn.Linear(self._ipa_conf.c_s, 21)
+            nn.Linear(self._ipa_conf.c_s, 22)
         )
         self.res_feat_mixer = nn.Sequential(
             nn.Linear(2 * self._ipa_conf.c_s + self.angles_embedder.get_out_dim(in_dim=5), self._ipa_conf.c_s),
@@ -116,7 +116,7 @@ class VQGABlock(nn.Module):
             ipa_embed = trunk[f'ipa_{b}'](
                 node_embed, edge_embed, curr_rigids, node_mask)
             ipa_embed *= node_mask[..., None]
-            node_embed = trunk['ipa_ln_{b}'](node_embed + ipa_embed)
+            node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
             
             node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
             seq_tfmr_out = trunk[f'seq_tfmr_{b}'](
@@ -156,11 +156,11 @@ class VQGABlock(nn.Module):
         angles = batch["angles"] * node_mask[..., None]
         rotmats = batch['rotmats'] * node_mask[..., None, None]
         trans = batch['trans'] * node_mask[..., None]
-        seqs = batch['seqs'] * node_mask[..., None]
+        seqs = torch.where(node_mask.bool(), batch["seqs"], 21)
      
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
 
-        node_embed = self.res_feat_mixer(torch.cat([node_embed, self.current_seq_embedder(seqs), self.angles_embedder(angles).reshape(num_batch,num_res,-1)],dim=-1))
+        node_embed = self.res_feat_mixer(torch.cat([batch['node_embed'] , self.current_seq_embedder(seqs), self.angles_embedder(angles).reshape(num_batch,num_res,-1)],dim=-1))
         node_embed = node_embed * node_mask[..., None]
         curr_rigids = du.create_rigid(rotmats, trans)
         
@@ -172,9 +172,14 @@ class VQGABlock(nn.Module):
     def decoder_step(self, node_embed, node_emb_raw, edge_embed, curr_rigids, node_mask, 
                      edge_mask, res_mask, generate_mask,  mode):
                 # 解码器主干处理
-        need_poc = mode == "pep_given_poc"
+        need_poc = mode == "pep_given_poc" or mode == "codebook"
         node_embed = node_embed * node_mask[..., None]
-        node_embed, curr_rigids = self.contex_filter(curr_rigids, res_mask, generate_mask, need_poc=need_poc)
+        poc_mask = torch.logical_and(node_mask, ~generate_mask)
+        curr_rigids = self.contex_filter(curr_rigids, poc_mask, need_poc=need_poc)
+        
+        if mode == "pep_given_poc" or mode == "codebook":
+            ## Fix the Pocket Features
+            node_embed[poc_mask] = node_emb_raw[poc_mask]
         
         node_embed, curr_rigids = self._process_trunk(
             'decoder', node_embed, edge_embed, curr_rigids, node_mask, edge_mask)
@@ -250,6 +255,8 @@ class VQGABlock(nn.Module):
             res_mask=batch['res_mask'], generate_mask=batch['generate_mask'],
             mode=mode
         )
+        res['vq_loss'] = 0.
+        
         return res
     
     
@@ -319,14 +326,14 @@ class VQGABlock(nn.Module):
         """获取空刚体"""
         B, L = poc_mask.shape
         
-        rotmats = torch.eye(3, device=self._ipa_conf.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
-        trans = torch.zeros(B, L, 3, device=self._ipa_conf.device, dtype=torch.float)
+        rotmats = torch.eye(3, device=poc_mask.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
+        trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
         
         if need_poc:
             rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]
             trans[poc_mask] = curr_rigids.get_trans()[poc_mask]
         
-        return du.get_rigid(rotmats=rotmats, trans=trans)
+        return du.create_rigid(rotmats, trans)
     
     
 def sizes_to_mask(original_sizes, max_size, device):

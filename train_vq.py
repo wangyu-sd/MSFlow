@@ -28,7 +28,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
     parser.add_argument('--logdir', type=str, default="/remote-home/wangyu/VQ-PAR/logs")
     parser.add_argument('--debug', action='store_true', default=False)
-    parser.add_argument('--device', type=str, default='cuda:0')
+    parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
@@ -92,7 +92,7 @@ if __name__ == '__main__':
     # model = get_model(config.model).to(args.device)
     model = VQPAR(config.model).to(args.device)
     # wandb.watch(model,log='all',log_freq=1)
-    logger.info(f'Number of parameters for mode {args.mode}: {count_parameters(model):d}')
+    logger.info(f'Number of parameters for model: {count_parameters(model)*1e-7:.2f}M')
 
     # Optimizer & Scheduler
     optimizer = get_optimizer(config.train.optimizer, model)

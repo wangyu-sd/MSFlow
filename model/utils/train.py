@@ -68,7 +68,8 @@ def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, i
         if loss_dict is None:
             continue
         for k, v in loss_dict.items():
-            logstr += ' | loss_%s_(%s) %.4f' % (loss_name, k, v.item())
+            if isinstance(v, torch.Tensor):
+                logstr += ' | loss_%s_(%s) %.4f' % (loss_name, k, v.item())
 
     for k, v in scalar_dict.items():
         logstr += ' | %s %.4f' % (k, v.item() if isinstance(v, torch.Tensor) else v)
@@ -76,8 +77,11 @@ def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, i
     
     
     for loss_name, loss_dict in zip(['all', 'poc', 'pep'], [loss_dict_all, loss_dict_poc, loss_dict_pep]):
+        if loss_dict is None:
+            continue
         for k,v in loss_dict.items():
-            wandb.log({f'train/loss_{loss_name}_{k}': v}, step=it)
+            if isinstance(v, torch.Tensor):
+                wandb.log({f'train/loss_{loss_name}_{k}': v}, step=it)
     for k,v in scalar_dict.items():
         wandb.log({f'train/{k}': v}, step=it)
 

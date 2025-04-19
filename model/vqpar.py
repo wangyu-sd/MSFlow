@@ -114,10 +114,10 @@ class VQPAR(nn.Module):
       
     def get_loss(self, res, fea_dict, mode, weigeht=1.):
         pred_trans, pred_rotmats, pred_angles, pred_seqs_prob, vq_loss = \
-            res['pred_trans'], res['pred_rotmats'], res['pred_angles'], res['pred_seqs_prob'], res['vq_loss']
+            res['pred_trans'], res['pred_rotmats'], res['pred_angles'], res['pred_seqs'], res['vq_loss']
         
-        trans, rotamats, angles, pred_angle_vec, seqs = \
-            fea_dict['trans'], fea_dict['rotmats'], fea_dict['angles'], fea_dict['pred_angle_vec'], fea_dict['seqs']
+        trans, rotamats, angles, seqs = \
+            fea_dict['trans'], fea_dict['rotmats'], fea_dict['angles'], fea_dict['seqs']
         gen_mask, res_mask = fea_dict['generate_mask'], fea_dict['res_mask']
         
         if mode == "codebook" or "poc_and_pep":
@@ -189,28 +189,28 @@ class VQPAR(nn.Module):
         res_mask, gen_mask = fea_dict['res_mask'], fea_dict['generate_mask']
         fea_dict['trans_raw'] = fea_dict['trans']
         
-        
+        fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], gen_mask, res_mask)
         all_loss, poc_loss, pep_loss = None, None, None
         
         if mode == "codebook":
-            fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
+            # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
             res = self.vqvae.forward_init(fea_dict, mode=mode)
-            all_loss = self.get_loss(res, fea_dict, mode=mode)
+            pep_loss = self.get_loss(res, fea_dict, mode='pep')
         
         elif mode == "poc_and_pep":
-            fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
-            res = self.vqvae(fea_dict, mode=mode)
-            all_loss = self.get_loss(res, fea_dict)
+            pass
+            # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
+            # res = self.vqvae(fea_dict, mode=mode)
+            # all_loss = self.get_loss(res, fea_dict)
             
         elif mode == "poc_or_pep":
-            poc_mask = torch.logical_and(res_mask, ~gen_mask)
-            fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], poc_mask, poc_mask)
-            poc_res = self.vqvae(fea_dict, mode='poc_only')
+            # poc_mask = torch.logical_and(res_mask, ~gen_mask)
+            # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], poc_mask, poc_mask)
+            # poc_res = self.vqvae(fea_dict, mode='poc_only')
             
-            poc_loss = self.get_loss(poc_res, fea_dict, mode='poc', weigeht=0.1)
+            # poc_loss = self.get_loss(poc_res, fea_dict, mode='poc', weigeht=0.1)
             
             ####### For Peptide
-            fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], gen_mask, poc_mask)
             pep_res = self.vqvae(fea_dict, mode='pep_given_poc')
             pep_loss = self.get_loss(pep_res, fea_dict, mode='pep')
             
