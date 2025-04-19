@@ -145,7 +145,7 @@ class VQGABlock(nn.Module):
         
         num_batch, num_res = batch["seqs"].shape
         
-        if mode == "poc_and_pep" or mode == "pep_given_poc":
+        if mode == "poc_and_pep" or mode == "pep_given_poc" or mode=='codebook':
             node_mask = batch["res_mask"]
         elif mode == "poc_only":
             node_mask = torch.logical_and(batch["res_mask"], ~batch["generate_mask"])
