@@ -1,0 +1,35 @@
+# .gitignore
+
+.vscode/*
+.ipynb_checkpoints/
+wandb/
+results/
+# data_modules/data/*
+
+packgae/
+
+**/__pycache__
+
+
+clean_logs.py
+
+compared_model/
+
+saved_cases/
+
+
+# dm/data/raw_pdb/*
+# dm/data/rna_only/*
+# dm/data/*
+# test_data/*
+# rna_list.pkl
+
+# data_modules/data/molopt/*
+# data_modules/data/opt2/*
+# data_modules/smidataset/checkpoints/ecfp4_with_counts_with_rank/weights.ckpt
+# data_modules/data/**/processed*
+# data_modules/data/voc/*
+# data_modules/data/**/logs
+# len_df_gpt2_bpe.csv
+# highlighted_molecule.svg
+# image/trajd/*
