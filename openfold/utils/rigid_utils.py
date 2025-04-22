@@ -228,7 +228,8 @@ def rot_to_quat(
     ]
 
     k = (1.0 / 3.0) * torch.stack([torch.stack(t, dim=-1) for t in k], dim=-2)
-
+        
+    
     _, vectors = torch.linalg.eigh(k)
     return vectors[..., -1]
 

@@ -11,6 +11,7 @@ from typing import Tuple, List, Dict
 from model.modules.protein.constants import ANG_TO_NM_SCALE, NM_TO_ANG_SCALE
 from model.modules.common.layers import AngularEncoding
 from model.vq import VectorQuantizer
+from dm import so3_utils
 
 import math
 
@@ -35,7 +36,7 @@ class VQGABlock(nn.Module):
             nn.Linear(self._ipa_conf.c_s, 22)
         )
         self.res_feat_mixer = nn.Sequential(
-            nn.Linear(2 * self._ipa_conf.c_s + self.angles_embedder.get_out_dim(in_dim=5), self._ipa_conf.c_s),
+            nn.Linear(2 * self._ipa_conf.c_s + self.angles_embedder.get_out_dim(in_dim=5) + 3, self._ipa_conf.c_s),
             nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
@@ -47,7 +48,7 @@ class VQGABlock(nn.Module):
         split_idx = self._ipa_conf.num_blocks // 2  # 假设将主干均分
         self.num_encoder_blocks = split_idx
         self.num_decoder_blocks = self._ipa_conf.num_blocks - split_idx
-        
+        self.scales = self._ipa_conf.scales
         # 编码器主干构建
         for b in range(split_idx):
             self._build_block(b, is_encoder=True)
@@ -55,7 +56,7 @@ class VQGABlock(nn.Module):
         # 向量量化层
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s,
+            embedding_dim=self._ipa_conf.c_s,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
@@ -108,7 +109,10 @@ class VQGABlock(nn.Module):
 
     def _process_trunk(self, trunk_type, node_embed, edge_embed, curr_rigids, node_mask, edge_mask):
         """通用主干处理流程"""
+        x = node_embed
+        
         trunk = self.encoder_trunk if trunk_type == 'encoder' else self.decoder_trunk
+        
         # prefix = 'enc_' if trunk_type == 'encoder' else 'dec_'
         num_blocks = self.num_encoder_blocks if trunk_type == 'encoder' else self.num_decoder_blocks
         
@@ -136,14 +140,12 @@ class VQGABlock(nn.Module):
                     node_embed, edge_embed)
                 edge_embed *= edge_mask[..., None]
                 
+            node_embed = x + node_embed
+                
         return node_embed, curr_rigids
     
     
-    
-    
     def encoder_step(self, batch, mode):
-        
-        num_batch, num_res = batch["seqs"].shape
         
         if mode == "poc_and_pep" or mode == "pep_given_poc" or mode=='codebook':
             node_mask = batch["res_mask"]
@@ -153,30 +155,36 @@ class VQGABlock(nn.Module):
             raise ValueError(f"Invalid mode: {mode}")
         
         
-        angles = batch["angles"] * node_mask[..., None]
         rotmats = batch['rotmats'] * node_mask[..., None, None]
         trans = batch['trans'] * node_mask[..., None]
-        seqs = torch.where(node_mask.bool(), batch["seqs"], 21)
-     
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
 
-        node_embed = self.res_feat_mixer(torch.cat([batch['node_embed'] , self.current_seq_embedder(seqs), self.angles_embedder(angles).reshape(num_batch,num_res,-1)],dim=-1))
-        node_embed = node_embed * node_mask[..., None]
+        node_embed = batch['node_embed'] * node_mask[..., None]
         curr_rigids = du.create_rigid(rotmats, trans)
         
         node_embed, _ = self._process_trunk(
             'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask)
         
+        # rotmats = rigids.get_rots().get_rot_mats()
+        # trans = rigids.get_trans()
+        # rotmats = so3_utils.rotmat_to_rotvec(rotmats)
+        
+        # node_embed = torch.cat([node_embed, rotmats, trans], dim=-1)
+        
+        # rotmats = so3_utils.rotvec_to_rotmat(node_embed[..., -6:-3])
+        # curr_rigids = du.create_rigid(rotmats, node_embed[..., -3:])
+        
         return node_embed, node_mask, edge_mask, curr_rigids
     
     def decoder_step(self, node_embed, node_emb_raw, edge_embed, curr_rigids, node_mask, 
                      edge_mask, res_mask, generate_mask,  mode):
-                # 解码器主干处理
-        need_poc = mode == "pep_given_poc" or mode == "codebook"
-        node_embed = node_embed * node_mask[..., None]
-        poc_mask = torch.logical_and(node_mask, ~generate_mask)
-        curr_rigids = self.contex_filter(curr_rigids, poc_mask, need_poc=need_poc)
         
+        need_poc = mode == "pep_given_poc" or mode == "codebook"
+        poc_mask = torch.logical_and(node_mask, ~generate_mask)
+        
+        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, need_poc=need_poc, hidden_str=None)
+        # node_embed = node_embed[..., :-6] * node_mask[..., None]
+        node_embed = node_embed * node_mask[..., None]
         if mode == "pep_given_poc" or mode == "codebook":
             ## Fix the Pocket Features
             node_embed[poc_mask] = node_emb_raw[poc_mask]
@@ -197,6 +205,43 @@ class VQGABlock(nn.Module):
             'pred_trans': pred_trans
         }
         
+    def before_quntinized(self, node_embed, gen_mask):
+        nodes_list = [node_embed[i][gen_mask[i]] for i in range(node_embed.shape[0])]
+        size = 2 ** self.scales
+        to_sizes = [size for _ in range(node_embed.shape[0])]
+        
+        quantized = self.interpolate_batch(nodes=nodes_list, to_sizes=to_sizes)
+        
+        return quantized
+    
+    def after_quntinized(self, quantized, node_mask):
+        nodes = torch.split(quantized, 1)
+        original_sizes = node_mask.sum(1)
+        quantized = self.interpolate_batch(
+            nodes=nodes, to_sizes=original_sizes, padding_size=node_mask.size(1),
+        ) # B, max_nodes, C
+        return quantized
+    
+    
+    def fea_fusion(self, batch, node_mask=None):
+        if node_mask is None:
+            node_mask = batch['res_mask']
+        
+        num_batch, num_res = batch["seqs"].shape
+        angles = batch["angles"] * node_mask[..., None]
+        seqs = torch.where(node_mask.bool(), batch["seqs"], 21)
+        rotmats = batch["rotmats"] * node_mask[..., None, None]
+        rotmats = so3_utils.rotmat_to_rotvec(rotmats)
+        
+        node_embed = self.res_feat_mixer(torch.cat([
+            batch['node_embed'], 
+            self.current_seq_embedder(seqs),
+            self.angles_embedder(angles).reshape(num_batch,num_res,-1),
+            rotmats],dim=-1))
+        
+        
+        node_embed = node_embed * node_mask[..., None]
+        return node_embed
         
     def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep"):
         """
@@ -205,19 +250,13 @@ class VQGABlock(nn.Module):
         Returns:
             _type_: _description_
         """
-        
         node_emb_raw = batch['node_embed']
-        
         node_embed, node_mask, edge_mask, curr_rigids = self.encoder_step(batch, mode)
-        node_embed = self.interpolate_batch(node_embed, to_sizes=256)
+        quantized = self.before_quntinized(node_embed, node_mask) # TODO Add more choices for gen_mask
         
-        quantized, commitment_loss, q_latent_loss = self.vq_layer(node_embed, node_mask)
+        quantized, commitment_loss, q_latent_loss = self.quantizer(node_embed, node_mask)
         
-        nodes = torch.split(quantized, 1)
-        original_sizes = node_mask.sum(1)
-        quantized = self.interpolate_batch(
-            nodes=nodes, to_sizes=original_sizes, padding_size=node_mask.size(1),
-        ) # B, max_nodes, C
+        quantized = self.after_quntinized(quantized, node_mask)
         
         res = self.decoder_step(
             node_embed=quantized, node_emb_raw=node_emb_raw, edge_embed=batch['edge_embed'],
@@ -242,11 +281,7 @@ class VQGABlock(nn.Module):
         
         # Secons stage: collect latent to initialise codebook words with k++ means, no quantization
         elif self.quantizer.collect_phase:
-            interpolated_nodes = self.interpolate_batch(
-                nodes=node_embed, 
-                to_sizes=256, 
-                padding_size=None
-            ) # B, max_scale, C
+            interpolated_nodes = self.before_quntinized(node_embed, node_mask)
             self.quantizer.collect_samples(interpolated_nodes.detach())
         
         res = self.decoder_step(
@@ -264,11 +299,7 @@ class VQGABlock(nn.Module):
         node_embed, node_mask, edge_mask, curr_rigids = self.encoder_step(
             batch, mode=mode
         )
-        interpolated_nodes = self.interpolate_batch(
-                nodes=node_embed, 
-                to_sizes=256, 
-                padding_size=None
-        ) # B, max_scale, C
+        interpolated_nodes = self.before_quntinized(node_embed, node_mask)
         self.quantizer.collect_samples(interpolated_nodes.detach())
 
         return self.quantizer.f_to_idxBl(interpolated_nodes)
@@ -278,11 +309,7 @@ class VQGABlock(nn.Module):
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
         curr_rigids = du.create_rigid(batch["rotmats"], batch["trans"])
         
-        nodes = torch.split(f_hat, 1)
-        original_sizes = node_mask.sum(1)
-        quantized = self.interpolate_batch(
-            nodes=nodes, to_sizes=original_sizes, padding_size=node_mask.size(1),
-        ) # B, max_nodes, C
+        quantized = self.after_quntinized(f_hat, node_mask)
         
         res = self.decoder_step(
             node_embed=quantized, node_emb_raw=batch['node_embed'], edge_embed=batch['edge_embed'],
@@ -322,12 +349,16 @@ class VQGABlock(nn.Module):
         
         return torch.stack(interpolated_nodes)
     
-    def contex_filter(self, curr_rigids, poc_mask, need_poc=False):
+    def contex_filter(self, curr_rigids, poc_mask, res_mask, need_poc=False, hidden_str=None):
         """获取空刚体"""
         B, L = poc_mask.shape
         
         rotmats = torch.eye(3, device=poc_mask.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
         trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
+        
+        if hidden_str is not None:
+            rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
+            trans[res_mask] = hidden_str[:, :, -3:][res_mask]
         
         if need_poc:
             rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]

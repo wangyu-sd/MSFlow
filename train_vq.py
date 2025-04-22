@@ -28,16 +28,16 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
     parser.add_argument('--logdir', type=str, default="/remote-home/wangyu/VQ-PAR/logs")
     parser.add_argument('--debug', action='store_true', default=False)
-    parser.add_argument('--device', type=str, default='cpu')
+    parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vqpar')
-    parser.add_argument('--mode', type=str, default='codebook', action='store', choices=['codebook', 'poc_and_pep', "poc_or_pep"])
+    parser.add_argument('--codebook_init', default=True, action='store_true')
     args = parser.parse_args()
 
-    args.name = args.name + '_' + args.mode
+    args.name = args.name
     # Version control
     branch, version = get_version()
     version_short = '%s-%s' % (branch, version[:7])
@@ -64,7 +64,7 @@ if __name__ == '__main__':
         with open(os.path.join(log_dir, 'commit.txt'), 'w') as f:
             f.write(branch + '\n')
             f.write(version + '\n')
-        ckpt_dir = os.path.join(log_dir, 'checkpoints', args.mode)
+        ckpt_dir = os.path.join(log_dir, 'checkpoints')
         if not os.path.exists(ckpt_dir): os.makedirs(ckpt_dir)
         logger = get_logger('train', log_dir)
         # writer = torch.utils.tensorboard.SummaryWriter(log_dir)
@@ -118,7 +118,7 @@ if __name__ == '__main__':
         
         
         
-    def train(it):
+    def train(it, mode):
         time_start = current_milli_time()
         model.train()
 
@@ -127,7 +127,7 @@ if __name__ == '__main__':
 
         # Forward pass
         # loss_dict, metric_dict = model.get_loss(batch) # get loss and metrics
-        all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch, mode=args.mode) # get loss and metrics  
+        all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch, mode=mode) # get loss and metrics  
         all_loss = sum_weighted_losses(all_loss_dict, config.train.loss_weights)
         poc_loss = sum_weighted_losses(poc_loss_dict, config.train.loss_weights)
         pep_loss = sum_weighted_losses(pep_loss_dict, config.train.loss_weights)
@@ -165,9 +165,10 @@ if __name__ == '__main__':
             'time_forward': (time_forward_end - time_start) / 1000,
             'time_backward': (time_backward_end - time_forward_end) / 1000,
         })
-        log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger)
+        if not args.debug:
+            log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger)
 
-    def validate(it):
+    def validate(it, mode):
         scalar_accum = ScalarMetricAccumulator()
         with torch.no_grad():
             model.eval()
@@ -178,7 +179,7 @@ if __name__ == '__main__':
 
                 # Forward pass
                 # loss_dict, metric_dict = model.get_loss(batch)
-                all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch, mode=args.mode) # get loss and metrics  
+                all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch, mode=mode) # get loss and metrics  
                 all_loss = sum_weighted_losses(all_loss_dict, config.train.loss_weights)
                 poc_loss = sum_weighted_losses(poc_loss_dict, config.train.loss_weights)
                 pep_loss = sum_weighted_losses(pep_loss_dict, config.train.loss_weights)
@@ -195,21 +196,53 @@ if __name__ == '__main__':
                             
         avg_loss = scalar_accum.get_average('loss')
         summary = scalar_accum.log(it, 'val', logger=logger, writer=writer)
-        for k,v in summary.items():
-            wandb.log({f'val/{k}': v}, step=it)
+        if not args.debug:      
+            for k,v in summary.items():
+                wandb.log({f'val/{k}': v}, step=it)
         # Trigger scheduler
         if config.train.scheduler.type == 'plateau':
             scheduler.step(avg_loss)
         else:
             scheduler.step()
         return avg_loss
+    
 
+    
     try:
         for it in range(it_first, config.train.max_iters + 1):
-            train(it)
+            
+            if model.vqvae.quantizer.init_steps >= 0 and args.codebook_init:
+                if it == 1:
+                    logger.info('Starting Initialisation Phase 1...')
+                if model.vqvae.quantizer.init_steps == 1:
+                    logger.info('Starting Initialisation Phase 2...')
+                    
+                train(it, mode='codebook')
+                
+                if model.vqvae.quantizer.init_steps <= 0 and not model.vqvae.quantizer.collect_phase:
+                    logger.info('Saving models...')
+                    ckpt_path = os.path.join(ckpt_dir + "_coodbook", '%d.pt' % it)
+                    torch.save({
+                        'config': config,
+                        'model': model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'scheduler': scheduler.state_dict(),
+                        'iteration': it,
+                        # 'avg_val_loss': avg_val_loss,
+                    }, ckpt_path)
+                    
+                    logger.info('Saving models to %s' % ckpt_path)
+                    break
+                    
+            else:
+                train(it, mode='pep_given_poc')
+                    
+                    
             # if it % config.train.val_freq == 0:
             #     avg_val_loss = validate(it)
                 # if not args.debug:
+                
+            
             if it % config.train.val_freq == 0:
                 ckpt_path = os.path.join(ckpt_dir, '%d.pt' % it)
                 torch.save({

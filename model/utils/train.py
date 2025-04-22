@@ -61,19 +61,21 @@ def get_warmup_sched(cfg, optimizer):
 
 
 def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, it, tag, logger=BlackHole(), writer=BlackHole()):
-    logstr = '[%s] Iter %05d' % (tag, it)
-    logstr += ' | loss %.4f' % loss.item()
     
-    for loss_name, loss_dict in zip(['all', 'poc', 'pep'], [loss_dict_all, loss_dict_poc, loss_dict_pep]):
-        if loss_dict is None:
-            continue
-        for k, v in loss_dict.items():
-            if isinstance(v, torch.Tensor):
-                logstr += ' | loss_%s_(%s) %.4f' % (loss_name, k, v.item())
+    if it % 20 == 0:
+        logstr = '[%s] Iter %05d' % (tag, it)
+        logstr += ' | loss %.4f' % loss.item()
+        
+        for loss_name, loss_dict in zip(['all', 'poc', 'pep'], [loss_dict_all, loss_dict_poc, loss_dict_pep]):
+            if loss_dict is None:
+                continue
+            for k, v in loss_dict.items():
+                if isinstance(v, torch.Tensor):
+                    logstr += ' | loss_%s_(%s) %.4f' % (loss_name, k, v.item())
 
-    for k, v in scalar_dict.items():
-        logstr += ' | %s %.4f' % (k, v.item() if isinstance(v, torch.Tensor) else v)
-    logger.info(logstr)
+        for k, v in scalar_dict.items():
+            logstr += ' | %s %.4f' % (k, v.item() if isinstance(v, torch.Tensor) else v)
+        logger.info(logstr)
     
     
     for loss_name, loss_dict in zip(['all', 'poc', 'pep'], [loss_dict_all, loss_dict_poc, loss_dict_pep]):

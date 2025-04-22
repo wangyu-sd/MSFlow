@@ -31,7 +31,7 @@ class VectorQuantizer(nn.Module):
         f_rest = f_no_grad.clone()
         f_hat  = torch.zeros_like(f_rest)
 
-        with torch.amp.autocast(enabled=False):
+        with torch.amp.autocast(enabled=False, device_type=f_BCN.device.type):
             mean_q_latent_loss: torch.Tensor = 0.0
             mean_commitment_loss: torch.Tensor = 0.0
             SN = len(self.scales)
@@ -70,7 +70,7 @@ class VectorQuantizer(nn.Module):
             self.collected_samples = self.collected_samples[-self.collect_desired_size:]
             self.collect_phase = False
             self.kmeans_init()
-            self.collected_samples = torch.Tensor(0, self.embedding_dim, device=self.collected_samples.device)
+            self.collected_samples = torch.zeros(0, self.embedding_dim, device=self.collected_samples.device)
     
     def kmeans_init(self):
         print('K++ means Codebook initialisation starting...')

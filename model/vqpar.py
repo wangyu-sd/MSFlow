@@ -68,7 +68,7 @@ class VQPAR(nn.Module):
         
     
     def extract_fea(self, batch):
-        rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N] )
+        rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])      
         trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
         seqs_1 = batch['aa']
 
@@ -86,7 +86,8 @@ class VQPAR(nn.Module):
         # num_batch, num_res = batch['aa'].shape
         gen_mask,res_mask, angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
         
-        return {
+        
+        batched_res = {
             "rotmats": rotmats_1,
             "trans": trans_1,
             "angles": angles_1, 
@@ -96,6 +97,10 @@ class VQPAR(nn.Module):
             "generate_mask": gen_mask,
             "res_mask": res_mask,
         }
+        
+        batched_res['node_embed'] = self.vqvae.fea_fusion(batched_res)
+        
+        return batched_res
     
     def zero_center_part(self,pos,gen_mask,res_mask):
         """
@@ -120,7 +125,7 @@ class VQPAR(nn.Module):
             fea_dict['trans'], fea_dict['rotmats'], fea_dict['angles'], fea_dict['seqs']
         gen_mask, res_mask = fea_dict['generate_mask'], fea_dict['res_mask']
         
-        if mode == "codebook" or "poc_and_pep":
+        if mode == "codebook" or mode == "codebook":
             gen_mask = res_mask
         elif mode == "poc":
             gen_mask = torch.logical_and(res_mask, ~gen_mask)
@@ -131,7 +136,7 @@ class VQPAR(nn.Module):
         
         
         pred_trans_c, _ = self.zero_center_part(pred_trans, gen_mask, res_mask)
-        trans_loss = torch.sum((pred_trans_c - pred_trans_c)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
+        trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
         
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
@@ -194,7 +199,7 @@ class VQPAR(nn.Module):
         
         if mode == "codebook":
             # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
-            res = self.vqvae.forward_init(fea_dict, mode=mode)
+            res = self.vqvae.forward_init(fea_dict, mode="pep_given_poc")
             pep_loss = self.get_loss(res, fea_dict, mode='pep')
         
         elif mode == "poc_and_pep":
