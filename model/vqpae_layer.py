@@ -46,12 +46,11 @@ class VQPAEBlock(nn.Module):
         # 主干拆分
         self.encoder_trunk = nn.ModuleDict()
         self.decoder_trunk = nn.ModuleDict()
-        split_idx = self._ipa_conf.num_blocks // 2  # 假设将主干均分
-        self.num_encoder_blocks = split_idx
-        self.num_decoder_blocks = self._ipa_conf.num_blocks - split_idx
+        self.num_encoder_blocks = self._ipa_conf.num_encoder_blocks
+        self.num_decoder_blocks = self._ipa_conf.num_decoder_blocks
         self.scales = self._ipa_conf.scales
         # 编码器主干构建
-        for b in range(split_idx):
+        for b in range(self.num_encoder_blocks):
             self._build_block(b, is_encoder=True)
             
         # 向量量化层
@@ -74,10 +73,10 @@ class VQPAEBlock(nn.Module):
         self.mu_prj = nn.Linear(
             self._ipa_conf.c_s, self._ipa_conf.c_s
         )
-        self.decoder_init_rigid = nn.Sequential(
-            ipa_pytorch.StructureModuleTransition(c=self._ipa_conf.c_s),
-            ipa_pytorch.BackboneUpdate(self._ipa_conf.c_s, use_rot_updates=True),
-        )
+        # self.decoder_init_rigid = nn.Sequential(
+        #     ipa_pytorch.StructureModuleTransition(c=self._ipa_conf.c_s),
+        #     ipa_pytorch.BackboneUpdate(self._ipa_conf.c_s, use_rot_updates=True),
+        # )
 
     def _build_block(self, b, is_encoder):
 
@@ -129,38 +128,40 @@ class VQPAEBlock(nn.Module):
         # prefix = 'enc_' if trunk_type == 'encoder' else 'dec_'
         num_blocks = self.num_encoder_blocks if trunk_type == 'encoder' else self.num_decoder_blocks
         
-        for b in range(num_blocks):
-            ipa_embed = trunk[f'ipa_{b}'](
-                node_embed, edge_embed, curr_rigids, node_mask)
-            ipa_embed *= node_mask[..., None]
-            node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
-            
-            node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
-            seq_tfmr_out = trunk[f'seq_tfmr_{b}'](
-                node_embed, src_key_padding_mask=(1 - node_mask).bool())
-            node_embed = node_embed + trunk[f'post_tfmr_{b}'](seq_tfmr_out)
-            node_embed = trunk[f'node_transition_{b}'](node_embed)
-            node_embed = node_embed * node_mask[..., None]
-            
-            # if trunk_type == 'decoder' or b < num_blocks-1:
-            rigid_update = trunk[f'bb_update_{b}'](
-                node_embed * node_mask[..., None])
-            curr_rigids = curr_rigids.compose_q_update_vec(
-                rigid_update, node_mask[..., None])
-            
-            rot = curr_rigids.get_rots().get_rot_mats()
-            trans = curr_rigids.get_trans()
-            node_embed, edge_embed = trunk[f'fea_fusion_{b}'](
-                node_embed, edge_embed, rot, trans, node_mask, edge_mask)
-            
+        
+        for _ in range(3):
+            for b in range(num_blocks):
+                ipa_embed = trunk[f'ipa_{b}'](
+                    node_embed, edge_embed, curr_rigids, node_mask)
+                ipa_embed *= node_mask[..., None]
+                node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
+                
+                node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
+                seq_tfmr_out = trunk[f'seq_tfmr_{b}'](
+                    node_embed, src_key_padding_mask=(1 - node_mask).bool())
+                node_embed = node_embed + trunk[f'post_tfmr_{b}'](seq_tfmr_out)
+                node_embed = trunk[f'node_transition_{b}'](node_embed)
+                node_embed = node_embed * node_mask[..., None]
+                
+                # if trunk_type == 'decoder' or b < num_blocks-1:
+                rigid_update = trunk[f'bb_update_{b}'](
+                    node_embed * node_mask[..., None])
+                curr_rigids = curr_rigids.compose_q_update_vec(
+                    rigid_update, node_mask[..., None])
+                
+                rot = curr_rigids.get_rots().get_rot_mats()
+                trans = curr_rigids.get_trans()
+                node_embed, edge_embed = trunk[f'fea_fusion_{b}'](
+                    node_embed, edge_embed, rot, trans, node_mask, edge_mask)
+                
 
-            if b < num_blocks-1:
-                edge_embed = trunk[f'edge_transition_{b}'](
-                    node_embed, edge_embed)
-                edge_embed *= edge_mask[..., None]
+                if b < num_blocks-1:
+                    edge_embed = trunk[f'edge_transition_{b}'](
+                        node_embed, edge_embed)
+                    edge_embed *= edge_mask[..., None]
 
-            
-            node_embed = x + node_embed
+                
+                node_embed = x + node_embed
                 
         return node_embed, curr_rigids
     
@@ -214,7 +215,7 @@ class VQPAEBlock(nn.Module):
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
         
-        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, need_poc=need_poc, hidden_str=None, node_embed=node_embed)
+        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, need_poc=need_poc, hidden_str=None)
         # node_embed = node_embed[..., :-6] * node_mask[..., None]
         node_embed = node_embed * node_mask[..., None]
         
@@ -417,7 +418,7 @@ class VQPAEBlock(nn.Module):
             
         return torch.stack(interpolated_nodes, dim=0)
     
-    def contex_filter(self, curr_rigids, poc_mask, res_mask, need_poc=False, hidden_str=None, node_embed=None):
+    def contex_filter(self, curr_rigids, poc_mask, res_mask, need_poc=False, hidden_str=None):
         """获取空刚体"""
         B, L = poc_mask.shape
         res_mask = res_mask.bool()
@@ -425,12 +426,6 @@ class VQPAEBlock(nn.Module):
         rotmats = torch.eye(3, device=poc_mask.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
         trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
         
-        curr_rigids2 = du.create_rigid(rotmats, trans)
-        rigids_update = self.decoder_init_rigid(node_embed)
-        curr_rigids2 = curr_rigids2.compose_q_update_vec(rigids_update, res_mask[..., None])
-        
-        rotmats[res_mask] = curr_rigids2.get_rots().get_rot_mats()[res_mask]
-        trans[res_mask] = curr_rigids2.get_trans()[res_mask]
         
         if hidden_str is not None:
             rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
@@ -481,7 +476,7 @@ class FeaFusionLayer(nn.Module):
         # trans = rigid.get_trans() # B, L, 3
         dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
         dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
-        node_emb = node_emb + rot + dist.sum(dim=-2) / edge_mask.sum(dim=-1)[..., None]
+        node_emb = node_emb + rot
         
         edge_emb = edge_emb + dist
         
