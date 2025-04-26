@@ -1,69 +1,61 @@
-import numpy as np
+# import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import copy
-import math
-from tqdm.auto import tqdm
-import functools
-from torch.utils.data import DataLoader
-import os
-import argparse
+# import copy
+# import math
+# from tqdm.auto import tqdm
+# import functools
+# from torch.utils.data import DataLoader
+# import os
+# import argparse
 from typing import Dict
 
-import pandas as pd
+# import pandas as pd
 
 from model.models_con.edge import EdgeEmbedder
 from model.models_con.node import NodeEmbedder
-from model.modules.common.layers import sample_from, clampped_one_hot
-from model.models_con.ga import VQGABlock
+# from model.modules.common.layers import sample_from, clampped_one_hot
+from model.vqpae_layer import VQPAEBlock
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
 from model.modules.common.geometry import construct_3d_basis
-from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
-from model.utils.misc import seed_all
-from model.utils.train import sum_weighted_losses
-from torch.nn.utils import clip_grad_norm_
+# from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
+# from model.utils.misc import seed_all
+# from model.utils.train import sum_weighted_losses
+# from torch.nn.utils import clip_grad_norm_
 
-from model.modules.so3.dist import centered_gaussian,uniform_so3
-from model.modules.common.geometry import batch_align, align
+# from model.modules.so3.dist import centered_gaussian,uniform_so3
+# from model.modules.common.geometry import batch_align, align
 
-from tqdm import tqdm
+# from tqdm import tqdm
 
-import wandb
+# import wandb
 
 from dm import so3_utils
 from dm import all_atom
 
-from model.models_con.pep_dataloader import PepDataset
+# from model.models_con.pep_dataloader import PepDataset
 
-from model.utils.misc import load_config
-from model.utils.train import recursive_to
-from easydict import EasyDict
+# from model.utils.misc import load_config
+# from model.utils.train import recursive_to
+# from easydict import EasyDict
 
-from model.models_con.utils import process_dic
-from model.models_con.torsion import get_torsion_angle, torsions_mask
-import model.models_con.torus as torus
 
-import gc
-
-from copy import deepcopy
-from model.utils.data import PaddingCollate
-collate_fn = PaddingCollate(eight=False)
-from model.utils.train import recursive_to
+from model.models_con.torsion import torsions_mask
 
 resolution_to_num_atoms = {
     'backbone+CB': 5,
     'full': max_num_heavyatoms
 }
 
-class VQPAR(nn.Module):
+class VQPAE(nn.Module):
     def __init__(self,cfg):
         super().__init__()
         self._model_cfg = cfg.encoder
         self.node_embedder = NodeEmbedder(cfg.encoder.node_embed_size,max_num_heavyatoms)
         self.edge_embedder = EdgeEmbedder(cfg.encoder.edge_embed_size,max_num_heavyatoms)
-        self.vqvae: VQGABlock = VQGABlock(cfg.encoder.ipa)
+        self.vqvae: VQPAEBlock = VQPAEBlock(cfg.encoder.ipa)
     
         
     
@@ -77,6 +69,7 @@ class VQPAR(nn.Module):
         context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         structure_mask = context_mask 
         sequence_mask = context_mask 
+        
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
                                         batch['mask_heavyatom'], structure_mask=structure_mask, sequence_mask=sequence_mask)
         edge_embed = self.edge_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
@@ -85,7 +78,7 @@ class VQPAR(nn.Module):
         
         # num_batch, num_res = batch['aa'].shape
         gen_mask,res_mask, angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
-        
+        trans_1, _ = self.zero_center_part(trans_1, gen_mask, res_mask)
         
         batched_res = {
             "rotmats": rotmats_1,
@@ -98,7 +91,7 @@ class VQPAR(nn.Module):
             "res_mask": res_mask,
         }
         
-        batched_res['node_embed'] = self.vqvae.fea_fusion(batched_res)
+        batched_res['node_embed'], batch['edge_embed'] = self.vqvae.fea_fusion(batched_res)
         
         return batched_res
     
@@ -125,10 +118,10 @@ class VQPAR(nn.Module):
             fea_dict['trans'], fea_dict['rotmats'], fea_dict['angles'], fea_dict['seqs']
         gen_mask, res_mask = fea_dict['generate_mask'], fea_dict['res_mask']
         
-        if mode == "codebook" or mode == "codebook":
+        if mode == "codebook":
             gen_mask = res_mask
         elif mode == "poc":
-            gen_mask = torch.logical_and(res_mask, ~gen_mask)
+            gen_mask = torch.logical_and(res_mask, 1-gen_mask)
         elif mode == 'pep':
             gen_mask = gen_mask
         else:
@@ -208,8 +201,9 @@ class VQPAR(nn.Module):
             # res = self.vqvae(fea_dict, mode=mode)
             # all_loss = self.get_loss(res, fea_dict)
             
-        elif mode == "poc_or_pep":
-            # poc_mask = torch.logical_and(res_mask, ~gen_mask)
+        # elif mode == "poc_or_pep":
+        elif mode == "pep_given_poc":
+            # poc_mask = torch.logical_and(res_mask, 1-gen_mask)
             # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], poc_mask, poc_mask)
             # poc_res = self.vqvae(fea_dict, mode='poc_only')
             
@@ -218,7 +212,6 @@ class VQPAR(nn.Module):
             ####### For Peptide
             pep_res = self.vqvae(fea_dict, mode='pep_given_poc')
             pep_loss = self.get_loss(pep_res, fea_dict, mode='pep')
-            
         
 
         return all_loss, poc_loss, pep_loss

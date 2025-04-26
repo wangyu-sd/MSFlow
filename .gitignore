@@ -5,6 +5,8 @@
 wandb/
 results/
 logs/
+log_par/
+log_sample/
 # data_modules/data/*
 
 packgae/

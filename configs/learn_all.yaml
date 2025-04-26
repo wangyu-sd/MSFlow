@@ -1,10 +1,10 @@
 model:
   encoder:
     node_embed_size: 128
-    edge_embed_size: 64
+    edge_embed_size: 32
     ipa:
       c_s: 128 #${model.node_embed_size}
-      c_z: 64 #${model.edge_embed_size}
+      c_z: 32 #${model.edge_embed_size}
       c_hidden: 128
       no_heads: 8
       no_qk_points: 8
@@ -16,9 +16,16 @@ model:
       codebook_size: 512
       # codebook_dim: 32
       commitment_cost: 0.25
-      init_steps: 5000
+      init_steps: 20000
       collect_desired_size: 9000
       scales: 8
+
+par:
+  depth: 6
+  num_heads: 8
+  emb_dim: 128
+  mlp_ratio: 2
+
   # interpolant:
   #   min_t: 1.e-2
   #   t_normalization_clip: 0.9
@@ -49,8 +56,9 @@ train:
     torsion_loss: 0.5
     vq_loss: 0.5
   max_iters: 400000000
-  val_freq: 20000
+  val_freq: 2000
   batch_size: 10
+  batch_size_pr: 10
   accum_grad: 1
   seed: 114514
   max_grad_norm: 100.0

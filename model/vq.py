@@ -114,12 +114,15 @@ class VectorQuantizer(nn.Module):
         B, N, C = gt_idx_Bl[0].shape[0], self.scales[-1], self.embedding_dim
         SN = len(self.scales)
 
-        f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
+        # f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
         pn_next = self.scales[0]
         for si in range(SN-1):
-            h_BCn = F.interpolate(self.embedding(gt_idx_Bl[si]).transpose_(1, 2).view(B, C, pn_next), size=(N), mode='linear')
+            h_BCn = F.interpolate(self.embedding(gt_idx_Bl[si]).transpose_(1, 2).view(B, C, pn_next), size=(pn_next * 2), mode='linear')
+            #From: 0,   1, 1, 2, 2, 2, 2
+            #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
+            next_scales.append(h_BCn.transpose(1, 2)) # B, N, C
             pn_next = self.scales[si+1]
-            next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
+            # next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
         
         return torch.cat(next_scales, dim=1) # cat BlCs to BLC
     

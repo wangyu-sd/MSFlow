@@ -5,6 +5,7 @@ import shutil
 import argparse
 import torch
 import torch.cuda.amp as amp
+import torch.nn.functional as F
 import torch.distributed as distrib
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, random_split
@@ -19,38 +20,40 @@ from model.utils.data import PaddingCollate
 from model.utils.train import ScalarMetricAccumulator, count_parameters, get_optimizer, get_scheduler, log_losses, recursive_to, sum_weighted_losses
 
 from model.models_con.pep_dataloader import PepDataset
+from model.par import PAR
 # from models_con.flow_model import FlowModel
+from torch.serialization import add_safe_globals
+import easydict
+add_safe_globals([easydict.EasyDict])
 
 from model.vqpae import VQPAE
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
-    parser.add_argument('--logdir', type=str, default="/remote-home/wangyu/VQ-PAR/logs")
+    parser.add_argument('--logdir', type=str, default="/remote-home/wangyu/VQ-PAR/log_par")
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-d443eff]_2025_04_25__20_58_07/checkpoints/50002_coodbook.pt")
-    parser.add_argument('--name', type=str, default='vqpar')
-    parser.add_argument('--codebook_init', default=False, action='store_true')
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-d443eff]_2025_04_22__15_49_49/checkpoints/2000.pt")
+    # /remote-home/wangyu/VQ-PAR/log_par/learn_all[main-d443eff]_2025_04_23__15_00_18/checkpoints/36000.pt
+    parser.add_argument('--name', type=str, default='train_par')
+    # parser.add_argument('--codebook_init', default=False, action='store_true')
     args = parser.parse_args()
 
     args.name = args.name
     # Version control
     branch, version = get_version()
     version_short = '%s-%s' % (branch, version[:7])
-    if has_changes() and not args.debug:
-        c = input('Start training anyway? (y/n) ')
-        if c != 'y':
-            exit()
+    # if has_changes() and not args.debug:
+    #     c = input('Start training anyway? (y/n) ')
+    #     if c != 'y':
+    #         exit()
 
     # Load configs
-    
-    if args.from_pretrain:
-        path = os.path.dirname(os.path.dirname(args.from_pretrain))
-        args.config = os.path.join(path, args.config.split('/')[-1])
+
     
     config, config_name = load_config(args.config)
     seed_all(config.train.seed)
@@ -87,20 +90,28 @@ if __name__ == '__main__':
                                             name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
     val_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size_pr, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
     train_iterator = inf_iterator(train_loader)
-    val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size_pr, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     logger.info('Train %d | Val %d' % (len(train_dataset), len(val_dataset)))
 
     # Model
     logger.info('Building model...')
     # model = get_model(config.model).to(args.device)
-    model = VQPAE(config.model).to(args.device)
+    # model_vq = VQPAE(config.model).to(args.device)
+    logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
+    ckpt = torch.load(args.from_pretrain, map_location=args.device, weights_only=True)
+    model_vq = VQPAE(ckpt['config'].model).to(args.device)  
+    model_vq.load_state_dict(ckpt['model'])
+    logger.info('Done!')
+    
+    model_par: PAR = PAR(model_vq, config).to(args.device)
     # wandb.watch(model,log='all',log_freq=1)
-    logger.info(f'Number of parameters for model: {count_parameters(model)*1e-7:.2f}M')
+    logger.info(f'Number of parameters for model: {count_parameters(model_vq)*1e-7:.2f}M')
+    logger.info(f'Number of parameters for model_par: {count_parameters(model_par)*1e-7:.2f}M')
 
     # Optimizer & Scheduler
-    optimizer = get_optimizer(config.train.optimizer, model)
+    optimizer = get_optimizer(config.train.optimizer, model_par)
     scheduler = get_scheduler(config.train.scheduler, optimizer)
     optimizer.zero_grad()
     it_first = 1
@@ -110,34 +121,24 @@ if __name__ == '__main__':
         logger.info('Resuming from checkpoint: %s' % args.resume)
         ckpt = torch.load(args.resume, map_location=args.device)
         it_first = ckpt['iteration']  # + 1
-        model.load_state_dict(ckpt['model'])
+        model_par.load_state_dict(ckpt['model'])
         logger.info('Resuming optimizer states...')
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
         scheduler.load_state_dict(ckpt['scheduler'])
         
-    elif args.from_pretrain is not None:
-        logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
-        ckpt = torch.load(args.from_pretrain, map_location=args.device)
-        logger.info(f'Loading pretrain model states from {args.from_pretrain}')
-        model.load_state_dict(ckpt['model'])
-        logger.info('Done!')
         
-        
+    model = model_par
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
 
         # Prepare data
         batch = recursive_to(next(train_iterator), args.device)
-
-        # Forward pass
-        # loss_dict, metric_dict = model.get_loss(batch) # get loss and metrics
-        all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch, mode=mode) # get loss and metrics  
-        all_loss = sum_weighted_losses(all_loss_dict, config.train.loss_weights)
-        poc_loss = sum_weighted_losses(poc_loss_dict, config.train.loss_weights)
-        pep_loss = sum_weighted_losses(pep_loss_dict, config.train.loss_weights)
-        loss = all_loss + poc_loss + pep_loss
+        
+        logits_BLV, gt_BL = model(batch) # get loss and metrics
+        loss = F.cross_entropy(logits_BLV.view(-1, logits_BLV.size(-1)), gt_BL.view(-1), reduction='none')
+        loss = loss.mean()
         
         # loss = loss / config.train.accum_grad
         time_forward_end = current_milli_time()
@@ -172,7 +173,7 @@ if __name__ == '__main__':
             'time_backward': (time_backward_end - time_forward_end) / 1000,
         })
         if not args.debug:
-            log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger)
+            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger)
 
     def validate(it, mode):
         scalar_accum = ScalarMetricAccumulator()
@@ -183,22 +184,12 @@ if __name__ == '__main__':
                 # Prepare data
                 batch = recursive_to(batch, args.device)
 
-                # Forward pass
-                # loss_dict, metric_dict = model.get_loss(batch)
-                all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch, mode=mode) # get loss and metrics  
-                all_loss = sum_weighted_losses(all_loss_dict, config.train.loss_weights)
-                poc_loss = sum_weighted_losses(poc_loss_dict, config.train.loss_weights)
-                pep_loss = sum_weighted_losses(pep_loss_dict, config.train.loss_weights)
-                loss = all_loss + poc_loss + pep_loss
+                logits_BLV, gt_BL = model(batch) # get loss and metrics
+                loss = F.corss_entropy(logits_BLV.view(-1, logits_BLV.size(-1)), gt_BL.view(-1), reduction='none')
+                loss = loss.mean()
 
                 scalar_accum.add(name='loss', value=loss, batchsize=len(batch['aa']), mode='mean')
-                
-                for loss_name, loss_dict in zip(['all', 'poc', 'pep'], [all_loss_dict, poc_loss_dict, pep_loss_dict]):
-                    if loss_dict is None:
-                        continue
-                    for k, v in loss_dict.items():
-                        k = loss_name + "_" + k
-                        scalar_accum.add(name=k, value=v.mean().cpu().item(), batchsize=len(batch['aa']), mode='mean')
+
                             
         avg_loss = scalar_accum.get_average('loss')
         summary = scalar_accum.log(it, 'val', logger=logger, writer=writer)
@@ -216,38 +207,7 @@ if __name__ == '__main__':
     
     try:
         for it in range(it_first, config.train.max_iters + 1):
-            
-            if model.vqvae.quantizer.init_steps >= 0 and args.codebook_init:
-                if it == 1:
-                    logger.info('Starting Initialisation Phase 1...')
-                if model.vqvae.quantizer.init_steps == 1:
-                    logger.info('Starting Initialisation Phase 2...')
-                    
-                train(it, mode='codebook')
-                
-                if model.vqvae.quantizer.init_steps <= 0 and not model.vqvae.quantizer.collect_phase:
-                    logger.info('Saving models...')
-                    ckpt_path = os.path.join(ckpt_dir, '%d_coodbook.pt' % it)
-                    torch.save({
-                        'config': config,
-                        'model': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        'scheduler': scheduler.state_dict(),
-                        'iteration': it,
-                        # 'avg_val_loss': avg_val_loss,
-                    }, ckpt_path)
-                    
-                    logger.info('Saving models to %s' % ckpt_path)
-                    break
-                    
-            else:
-                train(it, mode='pep_given_poc')
-                    
-                    
-            # if it % config.train.val_freq == 0:
-            #     avg_val_loss = validate(it)
-                # if not args.debug:
-                
+            train(it, mode='pep_given_poc')
             
             if it % config.train.val_freq == 0:
                 ckpt_path = os.path.join(ckpt_dir, '%d.pt' % it)

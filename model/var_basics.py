@@ -1,143 +1,124 @@
 import torch, math
 import torch.nn as nn
-from functools import partial
-from typing import Tuple
+import torch.nn.functional as F
 
-from model.var_basics import AdaLNSelfAttn, AdaLNBeforeHead, SharedAdaLin
-from model.var_helpers import sample_with_top_k_top_p
-from model.vq import VectorQuantizer
+from model.var_helpers import DropPath, drop_path
 
 
-class VAR(nn.Module):
-    def __init__(self,
-        vqvgae, config, 
-        drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.0, cond_drop_rate=0.1,
-        attn_l2_norm=False, norm_eps=1e-6,
+class FFN(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, drop=0.):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = nn.GELU(approximate='tanh')
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop, inplace=True) if drop > 0 else nn.Identity()
+    
+    def forward(self, x):
+        return self.drop(self.fc2(self.act(self.fc1(x))))
+
+
+class SelfAttention(nn.Module):
+    def __init__(
+        self, block_idx, embed_dim=768, num_heads=12,
+        attn_drop=0., proj_drop=0., attn_l2_norm=False
     ):
         super().__init__()
+        assert embed_dim % num_heads == 0
+        self.block_idx, self.num_heads, self.head_dim = block_idx, num_heads, embed_dim // num_heads
+        self.attn_l2_norm = attn_l2_norm
+        if self.attn_l2_norm:
+            self.scale = 1
+            self.scale_mul_1H11 = nn.Parameter(torch.full(size=(1, self.num_heads, 1, 1), fill_value=4.0).log(), requires_grad=True)
+            self.max_scale_mul = torch.log(torch.tensor(100)).item()
+        else:
+            self.scale = 0.25 / math.sqrt(self.head_dim)
         
-        # Hyperparameters
-        self.depth = config.var.depth
-        self.num_heads = config.var.num_heads
-        self.C = self.D = config.var.emb_dim
-
-        self.Cvae = vqvgae.quantizer.embedding_dim
-        self.V = vqvgae.quantizer.codebook_size
-
-        self.scales = config.vqvgae.quantizer.scales
-        self.L = sum(self.scales)                
-        self.first_l = self.scales[0]   # Size of the first scale (will be replaced by a class label of the same size during training)
-        self.num_scales_minus_1 = len(self.scales) - 1
-
-        self.num_classes = config.var.num_classes # For conditional generation
-        self.cond_drop_rate = cond_drop_rate
-
-        # Input (word) embedding
-        self.word_embed = nn.Linear(self.Cvae, self.C)
-        quant: VectorQuantizer = vqvgae.quantizer
-        self.vae_quant_proxy: Tuple[VectorQuantizer] = (quant, )
-        self.vae_proxy: Tuple[VQVGAE] = (vqvgae, )
+        self.mat_qkv = nn.Linear(embed_dim, embed_dim * 3, bias=False)
+        self.q_bias, self.v_bias = nn.Parameter(torch.zeros(embed_dim)), nn.Parameter(torch.zeros(embed_dim))
+        self.register_buffer('zero_k_bias', torch.zeros(embed_dim))
         
-        # Class embedding
-        init_std = math.sqrt(1 / self.C / 3)
-        self.class_embed = nn.Embedding(self.num_classes + 1, self.C) # +1 for no class label
-        nn.init.trunc_normal_(self.class_embed.weight.data, mean=0, std=init_std)
-        self.pos_start = nn.Parameter(torch.empty(1, self.first_l, self.C))
-        nn.init.trunc_normal_(self.pos_start.data, mean=0, std=init_std)
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.proj_drop = nn.Dropout(proj_drop, inplace=True) if proj_drop > 0 else nn.Identity()
+        self.attn_drop = attn_drop
         
-        # Absolute position embedding
-        self.pos_1LC = nn.Parameter(torch.empty(1, self.L, self.C))
-        nn.init.trunc_normal_(self.pos_1LC.data, mean=0, std=init_std)
-        self.lvl_embed = nn.Embedding(len(self.scales), self.C) # level embedding (similar to GPT's segment embedding, used to distinguish different levels of token pyramid)
-        nn.init.trunc_normal_(self.lvl_embed.weight.data, mean=0, std=init_std)
-
-        # Backbone
-        self.shared_ada_lin = nn.Sequential(nn.SiLU(inplace=False), SharedAdaLin(self.D, 6*self.C))
-        norm_layer = partial(nn.LayerNorm, eps=norm_eps)
-
-        # Backbone
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, self.depth)]  # stochastic depth decay rule (linearly increasing)
-        self.blocks = nn.ModuleList([
-            AdaLNSelfAttn(
-                cond_dim=self.D, block_idx=block_idx, embed_dim=self.C, norm_layer=norm_layer, 
-                num_heads=self.num_heads, mlp_ratio=config.var.train.mlp_ratio, drop=drop_rate, attn_drop=attn_drop_rate, 
-                drop_path=dpr[block_idx], last_drop_p=0 if block_idx==0 else dpr[block_idx-1], attn_l2_norm=attn_l2_norm,
-            )
-            for block_idx in range(self.depth)
-        ])
-        
-        # Attention mask used in training
-        d = torch.cat([torch.full((pn,), i) for i, pn in enumerate(self.scales)]).view(1, self.L, 1)
-        dT = d.transpose(1, 2)
-        lvl_1L = dT[:, 0].contiguous()
-        self.register_buffer('lvl_1L', lvl_1L)
-        attn_bias_for_masking = torch.where(d >= dT, 0., -torch.inf).reshape(1, 1, self.L, self.L)
-        self.register_buffer('attn_bias_for_masking', attn_bias_for_masking.contiguous())
-
-        # Classifier head
-        self.head_nm = AdaLNBeforeHead(self.C, self.D, norm_layer=norm_layer)
-        self.head = nn.Linear(self.C, self.V)
+        # only used during inference
+        self.caching, self.cached_k, self.cached_v = False, None, None
     
-
-    def forward(self, x_BLCv_wo_first_l, label_B):
-        B = x_BLCv_wo_first_l.shape[0]
-            
-        # SOS token
-        label_B = torch.where(torch.rand(B, device=label_B.device) < self.cond_drop_rate, 0, label_B) # B, 1
+    def kv_caching(self, enable: bool): 
+        self.caching, self.cached_k, self.cached_v = enable, None, None
+    
+    # NOTE: attn_bias is None during inference because kv cache is enabled
+    def forward(self, x, attn_bias):
+        B, L, C = x.shape
+        qkv = F.linear(input=x, weight=self.mat_qkv.weight, 
+                      bias=torch.cat((self.q_bias, self.zero_k_bias, self.v_bias))
+                      ).view(B, L, 3, self.num_heads, self.head_dim)
+        q, k, v = qkv.permute(2, 0, 3, 1, 4).unbind(dim=0)
         
-        sos = cond_BD = self.class_embed(label_B) # B, C
-        sos = sos.unsqueeze(1).expand(B, self.first_l, -1) + self.pos_start.expand(B, self.first_l, -1) # B, 1, C => SOS embedding (not token anymore)
-
-        # Whole sequence (SOS + sequence without first l)
-        x_BLC = torch.cat((sos, self.word_embed(x_BLCv_wo_first_l.float())), dim=1) # B, 1+L-1 (sos+l_wo_frst), C
-        x_BLC += self.lvl_embed(self.lvl_1L.expand(B, -1)) + self.pos_1LC # Add positional embedding => B, L, C
-
-        # Masking and SharedAdaLN
-        attn_bias = self.attn_bias_for_masking # 1, 1, L, L
-        cond_BD_or_gss = self.shared_ada_lin(cond_BD) # B, 1, 6, C
-
-        # Backbone
-        for block in self.blocks:
-            x_BLC = block(x=x_BLC, cond_BD=cond_BD_or_gss, attn_bias=attn_bias)
-        x_BLC = self.head(self.head_nm(x_BLC.float(), cond_BD).float()).float() # codeword for each L => B, L, V
+        if self.attn_l2_norm:
+            scale_mul = self.scale_mul_1H11.clamp_max(self.max_scale_mul).exp()
+            q = F.normalize(q, dim=-1).mul(scale_mul)
+            k = F.normalize(k, dim=-1)
         
-        return x_BLC
-
-    def autoregressive_infer_cfg(self, B, label_B, cfg, top_k, top_p):
-        sos = cond_BD = self.class_embed(torch.cat((label_B, torch.full_like(label_B, fill_value=0)), dim=0))
-
-        lvl_pos = self.lvl_embed(self.lvl_1L) + self.pos_1LC
-        next_token_map = sos.unsqueeze(1).expand(2*B, self.first_l, -1) + self.pos_start.expand(2*B, self.first_l, -1) + lvl_pos[:, :self.first_l]
-
-        cur_L = 0
-        f_hat = sos.new_zeros(B, self.Cvae, self.scales[-1])
-        for block in self.blocks:
-            block.attn.kv_caching(True)
+        if self.caching:
+            if self.cached_k is None: 
+                self.cached_k = k
+                self.cached_v = v
+            else: 
+                k = self.cached_k = torch.cat((self.cached_k, k), dim=2)
+                v = self.cached_v = torch.cat((self.cached_v, v), dim=2)
         
-        for si, pn in enumerate(self.scales):
-            ratio = si / self.num_scales_minus_1
-            cur_L += pn
-
-            cond_BD_or_gss = self.shared_ada_lin(cond_BD)
-            x = next_token_map
-            for block in self.blocks:
-                x = block(x=x, cond_BD=cond_BD_or_gss, attn_bias=None)
-            logits_BLV = self.head(self.head_nm(x.float(), cond_BD).float()).float() # codeword for each L => B, L, V
-
-            t = cfg * ratio
-            logits_BLV = (1+t) * logits_BLV[:B] - t * logits_BLV[B:]
-
-            idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
-            h_BCn = self.vae_quant_proxy[0].embedding(idx_Bl)   # B, l, Cvae
-            
-            h_BCn = h_BCn.transpose_(1, 2).reshape(B, self.Cvae, pn)
-            f_hat, next_token_map = self.vae_quant_proxy[0].get_next_autoregressive_input(si, len(self.scales), f_hat, h_BCn)
-            if si != self.num_scales_minus_1:
-                next_token_map = next_token_map.view(B, self.Cvae, -1).transpose(1, 2)
-                next_token_map = self.word_embed(next_token_map) + lvl_pos[:, cur_L:cur_L + self.scales[si+1]]
-                next_token_map = next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
+        attn = q.mul(self.scale) @ k.transpose(-2, -1)
+        if attn_bias is not None:
+            attn = attn + attn_bias
         
-        for block in self.blocks:
-            block.attn.kv_caching(False)
+        attn = F.dropout(attn.softmax(dim=-1), p=self.attn_drop if self.training else 0.0)
+        out = (attn @ v).transpose(1, 2).reshape(B, L, C)
         
-        return self.vae_proxy[0].fhat_to_graph(f_hat, original_sizes=label_B)
+        return self.proj_drop(self.proj(out))
+
+
+class AdaLNSelfAttn(nn.Module):
+    def __init__(
+        self, block_idx, last_drop_p, embed_dim, cond_dim, norm_layer,
+        num_heads, mlp_ratio=4., drop=0., attn_drop=0., drop_path=0., attn_l2_norm=False,
+        flash_if_available=False, fused_if_available=True,
+    ):
+        super(AdaLNSelfAttn, self).__init__()
+        self.block_idx, self.last_drop_p, self.C = block_idx, last_drop_p, embed_dim
+        self.C, self.D = embed_dim, cond_dim
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.attn = SelfAttention(block_idx=block_idx, embed_dim=embed_dim, num_heads=num_heads, attn_drop=attn_drop, proj_drop=drop, attn_l2_norm=attn_l2_norm)
+        self.ffn = FFN(in_features=embed_dim, hidden_features=round(embed_dim * mlp_ratio), drop=drop)
+        
+        self.ln_wo_grad = norm_layer(embed_dim, elementwise_affine=False)
+        self.ada_gss = nn.Parameter(torch.randn(1, 1, 6, embed_dim) / embed_dim**0.5)
+        
+        self.fused_add_norm_fn = None
+    
+    # NOTE: attn_bias is None during inference because kv cache is enabled
+    def forward(self, x, cond_BD, attn_bias):   # C: embed_dim, D: cond_dim
+        gamma1, gamma2, scale1, scale2, shift1, shift2 = (self.ada_gss + cond_BD).unbind(2) # 116C + B16C =unbind(2)=> 6 B1C
+        x = x + self.drop_path(self.attn( self.ln_wo_grad(x).mul(scale1.add(1)).add_(shift1), attn_bias=attn_bias ).mul_(gamma1))
+        x = x + self.drop_path(self.ffn( self.ln_wo_grad(x).mul(scale2.add(1)).add_(shift2) ).mul(gamma2)) # this mul(gamma2) cannot be in-placed when FusedMLP is used
+        return x
+
+
+class AdaLNBeforeHead(nn.Module):
+    def __init__(self, C, D, norm_layer):   # C: embed_dim, D: cond_dim
+        super().__init__()
+        self.C, self.D = C, D
+        self.ln_wo_grad = norm_layer(C, elementwise_affine=False)
+        self.ada_lin = nn.Sequential(nn.SiLU(inplace=False), nn.Linear(D, 2*C))
+    
+    def forward(self, x_BLC: torch.Tensor, cond_BD: torch.Tensor):
+        scale, shift = self.ada_lin(cond_BD).view(-1, 1, 2, self.C).unbind(2)
+        return self.ln_wo_grad(x_BLC).mul(scale.add(1)).add_(shift)
+
+
+class SharedAdaLin(nn.Linear):
+    def forward(self, cond_BD):
+        C = self.weight.shape[0] // 6
+        return super().forward(cond_BD).view(-1, 1, 6, C)   # B16C

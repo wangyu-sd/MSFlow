@@ -83,7 +83,7 @@ def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, i
             continue
         for k,v in loss_dict.items():
             if isinstance(v, torch.Tensor):
-                wandb.log({f'train/loss_{loss_name}_{k}': v}, step=it)
+                wandb.log({f'train/{loss_name}_{k}': v}, step=it)
     for k,v in scalar_dict.items():
         wandb.log({f'train/{k}': v}, step=it)
 
@@ -163,7 +163,7 @@ def sum_weighted_losses(losses, weights):
     if losses is None:
         return 0.
     
-    loss = 0
+    loss = 0.
     for k in losses.keys():
         if weights is None:
             loss = loss + losses[k]

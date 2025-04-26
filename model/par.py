@@ -1,48 +1,51 @@
 import torch, math
 import torch.nn as nn
 from functools import partial
-from typing import Tuple
+from typing import Tuple, List
 
 from model.vq import VectorQuantizer
 from model.var_basics import AdaLNSelfAttn, AdaLNBeforeHead, SharedAdaLin
 from model.var_helpers import sample_with_top_k_top_p
-from model.models_con.ga import VQGABlock
+from model.vqpae_layer import VQPAEBlock
+from model.vqpae import VQPAE
 
 
-class VAR(nn.Module):
+class PAR(nn.Module):
     def __init__(self,
-        vqvgae, config, 
+        vqpae: VQPAE, config, 
         drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.0, cond_drop_rate=0.1,
         attn_l2_norm=False, norm_eps=1e-6,
     ):
         super().__init__()
         
         # Hyperparameters
-        self.depth = config.var.depth
-        self.num_heads = config.var.num_heads
-        self.C = self.D = config.var.emb_dim
+        self.depth = config.par.depth
+        self.num_heads = config.par.num_heads
+        self.C = self.D = config.par.emb_dim
 
-        self.Cvae = vqvgae.quantizer.embedding_dim
-        self.V = vqvgae.quantizer.codebook_size
+        self.vqpae = vqpae
+        self.vqpae.eval()
+        
+        self.Cvae = vqpae.vqvae.quantizer.embedding_dim
+        self.V = vqpae.vqvae.quantizer.codebook_size
 
-        self.scales = config.vqvgae.quantizer.scales
+        self.scales = vqpae.vqvae.quantizer.scales
+        # self.scales = [2**i for i in range(self.scales+1)]
         self.L = sum(self.scales)                
         self.first_l = self.scales[0]   # Size of the first scale (will be replaced by a class label of the same size during training)
         self.num_scales_minus_1 = len(self.scales) - 1
 
-        self.num_classes = config.var.num_classes # For conditional generation
         self.cond_drop_rate = cond_drop_rate
 
         # Input (word) embedding
         self.word_embed = nn.Linear(self.Cvae, self.C)
-        quant: VectorQuantizer = vqvgae.quantizer
+        quant: VectorQuantizer = vqpae.vqvae.quantizer
         self.vae_quant_proxy: Tuple[VectorQuantizer] = (quant, )
-        self.vae_proxy: Tuple[VQGABlock] = (vqvgae, )
+        self.vae_proxy: Tuple[VQPAEBlock] = (vqpae.vqvae, )
         
         # Class embedding
         init_std = math.sqrt(1 / self.C / 3)
-        self.class_embed = nn.Embedding(self.num_classes + 1, self.C) # +1 for no class label
-        nn.init.trunc_normal_(self.class_embed.weight.data, mean=0, std=init_std)
+        self.poc_emb = nn.Linear(self.Cvae, self.C)
         self.pos_start = nn.Parameter(torch.empty(1, self.first_l, self.C))
         nn.init.trunc_normal_(self.pos_start.data, mean=0, std=init_std)
         
@@ -61,7 +64,7 @@ class VAR(nn.Module):
         self.blocks = nn.ModuleList([
             AdaLNSelfAttn(
                 cond_dim=self.D, block_idx=block_idx, embed_dim=self.C, norm_layer=norm_layer, 
-                num_heads=self.num_heads, mlp_ratio=config.var.train.mlp_ratio, drop=drop_rate, attn_drop=attn_drop_rate, 
+                num_heads=self.num_heads, mlp_ratio=config.par.mlp_ratio, drop=drop_rate, attn_drop=attn_drop_rate, 
                 drop_path=dpr[block_idx], last_drop_p=0 if block_idx==0 else dpr[block_idx-1], attn_l2_norm=attn_l2_norm,
             )
             for block_idx in range(self.depth)
@@ -79,14 +82,43 @@ class VAR(nn.Module):
         self.head_nm = AdaLNBeforeHead(self.C, self.D, norm_layer=norm_layer)
         self.head = nn.Linear(self.C, self.V)
     
-
-    def forward(self, x_BLCv_wo_first_l, label_B):
+    @ torch.no_grad()
+    def get_poc_cond(self, batch):
+        poc_mask = torch.logical_and(1-batch['generate_mask'], batch['res_mask'])
+        poc_cond = batch['node_embed'] * poc_mask[..., None].float()
+        return poc_cond.sum(dim=1) # B, D
+    
+    @ torch.no_grad()
+    def get_batched_fea(self, batch):
+        return self.vqpae.extract_fea(batch)
+    
+    @ torch.no_grad()
+    def gt_idx_Bl(self, batch, is_fea=False):
+        if is_fea:
+            batch_fea = batch
+        else:
+            batch_fea = self.get_batched_fea(batch)
+        gt_idx_Bl: List = self.vqpae.vqvae.graph_to_idxBl(batch_fea, mode='pep_given_poc')
+        return gt_idx_Bl
+        
+    
+    def forward(self, batch):
+        
+        with torch.no_grad():
+            batch_fea = self.get_batched_fea(batch)
+            gt_idx_Bl: List = self.vqpae.vqvae.graph_to_idxBl(batch_fea, mode='pep_given_poc')
+            x_BLCv_wo_first_l = self.vae_quant_proxy[0].idxBl_to_var_input(gt_idx_Bl)
+            poc_cond = self.get_poc_cond(batch_fea)
+            gt_BL = self.vqpae.vqvae.graph_to_idxBl(batch_fea, mode='pep_given_poc')
+            gt_BL = torch.cat(gt_idx_Bl, dim=1) 
+        
         B = x_BLCv_wo_first_l.shape[0]
             
         # SOS token
-        label_B = torch.where(torch.rand(B, device=label_B.device) < self.cond_drop_rate, 0, label_B) # B, 1
-        
-        sos = cond_BD = self.class_embed(label_B) # B, C
+        poc_cond = self.poc_emb(poc_cond) # B, Cvae
+        poc_cond = poc_cond * (torch.rand((B, 1), device=poc_cond.device) > self.cond_drop_rate)
+        sos = poc_cond # B, C
+        cond_BD = poc_cond
         sos = sos.unsqueeze(1).expand(B, self.first_l, -1) + self.pos_start.expand(B, self.first_l, -1) # B, 1, C => SOS embedding (not token anymore)
 
         # Whole sequence (SOS + sequence without first l)
@@ -102,10 +134,20 @@ class VAR(nn.Module):
             x_BLC = block(x=x_BLC, cond_BD=cond_BD_or_gss, attn_bias=attn_bias)
         x_BLC = self.head(self.head_nm(x_BLC.float(), cond_BD).float()).float() # codeword for each L => B, L, V
         
-        return x_BLC
-
-    def autoregressive_infer_cfg(self, B, label_B, cfg, top_k, top_p):
-        sos = cond_BD = self.class_embed(torch.cat((label_B, torch.full_like(label_B, fill_value=0)), dim=0))
+        
+        return x_BLC, gt_BL
+    
+    
+    @ torch.no_grad()
+    def autoregressive_infer_cfg(self, batch, cfg, top_k, top_p):
+        
+        
+        batch_fea = self.get_batched_fea(batch)
+        B = batch_fea['node_embed'].shape[0]
+        poc_cond = self.get_poc_cond(batch_fea)
+        
+        sos = self.poc_emb(torch.cat((poc_cond, torch.full_like(poc_cond, fill_value=0)), dim=0))
+        cond_BD = sos
 
         lvl_pos = self.lvl_embed(self.lvl_1L) + self.pos_1LC
         next_token_map = sos.unsqueeze(1).expand(2*B, self.first_l, -1) + self.pos_start.expand(2*B, self.first_l, -1) + lvl_pos[:, :self.first_l]
@@ -140,5 +182,30 @@ class VAR(nn.Module):
         
         for block in self.blocks:
             block.attn.kv_caching(False)
+            
+        results = self.vae_proxy[0].fhat_to_graph(f_hat.transpose(1, 2), batch_fea, mode='pep_given_poc')
+        return self.postprocess(results, batch_fea)
+    
+    def postprocess(self, results, batch_fea):
+        final =  {
+            'rotmats': results["pred_rotmats"],
+            'seqs': results["pred_seqs"].argmax(dim=-1),
+            'angles': results["pred_angles"],
+            'trans': results["pred_trans"]
+        }
         
-        return self.vae_proxy[0].fhat_to_graph(f_hat, original_sizes=label_B)
+        # Fix poc feature
+        poc_mask = torch.logical_and(1-batch_fea['generate_mask'], batch_fea['res_mask'])
+        final['trans'], _ = self.vqpae.zero_center_part(final['trans'], batch_fea['generate_mask'], batch_fea['res_mask'])
+        
+        final_ = {}
+        for k, v in final.items():
+            final[k][poc_mask] = batch_fea[k][poc_mask]
+            final_[k] = v
+            final_[k+"_gt"] = batch_fea[k]
+
+        final_['res_mask'] = batch_fea['res_mask']
+        final_['generate_mask'] = batch_fea['generate_mask']
+        
+        return final_
+    
