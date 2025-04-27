@@ -474,8 +474,10 @@ class FeaFusionLayer(nn.Module):
         )
         self.dist_net = nn.Sequential(
             nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
+            nn.LayerNorm(self._ipa_conf.c_s),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
+            nn.LayerNorm(self._ipa_conf.c_s),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
         
     def forward(self, node_emb, rot, trans, node_mask):
@@ -485,7 +487,7 @@ class FeaFusionLayer(nn.Module):
         # trans = rigid.get_trans() # B, L, 3
         # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
         # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
-        node_emb = node_emb + rot + self.dist_net(trans)
+        node_emb = node_emb + rot + self.dist_net(trans/100.)
         
         # edge_emb = edge_emb + dist
         
