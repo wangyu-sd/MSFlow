@@ -310,6 +310,7 @@ class VQPAEBlock(nn.Module):
         res['vq_loss'] = commitment_loss + q_latent_loss
 
         return res
+
     
     
     def forward_init(self, batch:Dict[str, torch.Tensor], mode):

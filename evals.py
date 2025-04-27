@@ -19,7 +19,7 @@ class PepComp:
     aar = diff_ratio(self.seq, other.seq)
     
     # Calculate RMSD
-    rmsd = get_rmsd(self.chain, other.chain)
+    rmsd = get_rmsd(self.chain, other.chain)[0]
 
     # Calculate SSR
     ssr = get_ss(self.traj, other.traj)
@@ -35,7 +35,7 @@ class PepComp:
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-d443eff]_2025_04_25__15_10_50/results')
+    parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-cdf5f7d]_2025_04_27__18_30_16/results')
     args = parser.parse_args()
     
     logger_dir = args.eval_dir.replace('results', 'eval_res')
@@ -51,7 +51,11 @@ if __name__ == '__main__':
       
       pep_chain_id = pdb_ids.split('_')[1]
       pdb_gt = os.path.join(path_current, pdb_ids+"_gt.pdb")
-      pdb_gt = PepComp(pdb_gt, pep_chain_id)
+      try:
+        pdb_gt = PepComp(pdb_gt, pep_chain_id)
+      except:
+        logger.info(f"Error in {pdb_gt}")
+        continue
       for sp_idx in range(batch_size):
         pdb_curr = os.path.join(path_current, f"{pdb_ids}_{sp_idx}.pdb")
         pdb_curr = PepComp(pdb_curr, pep_chain_id)

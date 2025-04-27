@@ -134,7 +134,11 @@ class ScalarMetricAccumulator(object):
         for k, v in summary.items():
             logstr += ' | %s %.4f' % (k, v)
             writer.add_scalar('%s/%s' % (tag, k), v, it)
-            wandb.log({f'{tag}/{k}': v}, step=it)
+            try:
+                wandb.log({f'{tag}/{k}': v}, step=it)
+            except:
+                pass
+            
         logger.info(logstr)
 
     def get_average(self, name):
