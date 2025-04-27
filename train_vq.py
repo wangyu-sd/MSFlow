@@ -10,8 +10,10 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, random_split
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm.auto import tqdm
-# torch.backends.cuda.matmul.allow_tf32 = True
-# torch.backends.cudnn.allow_tf32 = True
+
+USE_DDP = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 from model.utils.vc import get_version, has_changes
 from model.utils.misc import BlackHole, inf_iterator, load_config, seed_all, get_logger, get_new_log_dir, current_milli_time
@@ -32,8 +34,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-d443eff]_2025_04_25__20_58_07/checkpoints/50002_coodbook.pt")
-    parser.add_argument('--name', type=str, default='vqpar')
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-b35108e]_2025_04_26__18_42_13/checkpoints/1002_coodbook.pt")
+    parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
     args = parser.parse_args()
 

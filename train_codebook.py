@@ -9,9 +9,10 @@ import torch.distributed as distrib
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, random_split
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm
-# torch.backends.cuda.matmul.allow_tf32 = True
-# torch.backends.cudnn.allow_tf32 = True
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 from model.utils.vc import get_version, has_changes
 from model.utils.misc import BlackHole, inf_iterator, load_config, seed_all, get_logger, get_new_log_dir, current_milli_time
@@ -23,6 +24,8 @@ from model.models_con.pep_dataloader import PepDataset
 
 from model.vqpae import VQPAE
 
+
+LOCAL_RANK = -1
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
@@ -47,6 +50,10 @@ if __name__ == '__main__':
             exit()
 
     # Load configs
+    
+    if LOCAL_RANK > 0:
+        local_rank = LOCAL_RANK
+        torch.cuda.set_device(local_rank)
     
     if args.from_pretrain:
         path = os.path.dirname(os.path.dirname(args.from_pretrain))
@@ -87,15 +94,24 @@ if __name__ == '__main__':
                                             name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
     val_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
+    if LOCAL_RANK > 0:
+        train_sampler = DistributedSampler(train_dataset, shuffle=True)
+        val_sampler = DistributedSampler(val_dataset, shuffle=False)
+    else:
+        train_sampler = None
+        
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True, sampler=train_sampler)
     train_iterator = inf_iterator(train_loader)
     val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     logger.info('Train %d | Val %d' % (len(train_dataset), len(val_dataset)))
 
     # Model
     logger.info('Building model...')
+    if LOCAL_RANK < 0:
     # model = get_model(config.model).to(args.device)
-    model = VQPAE(config.model).to(args.device)
+        model = VQPAE(config.model).to(args.device)
+    else:
+        model = DDP(VQPAE(config.model).to(LOCAL_RANK), device_ids=[LOCAL_RANK], find_unused_parameters=True)
     # wandb.watch(model,log='all',log_freq=1)
     logger.info(f'Number of parameters for model: {count_parameters(model)*1e-7:.2f}M')
 
@@ -115,6 +131,8 @@ if __name__ == '__main__':
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
         scheduler.load_state_dict(ckpt['scheduler'])
+        model.vqvae.quantizer.init_steps = 1
+        model.vqvae.quantizer.collect_phase = False
         
     elif args.from_pretrain is not None:
         logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)

@@ -67,16 +67,17 @@ class VQPAEBlock(nn.Module):
         for b in range(self.num_decoder_blocks):
             self._build_block(b, is_encoder=False)
             
-        self.var_prj = nn.Linear(
-            self._ipa_conf.c_s, self._ipa_conf.c_s
+        self.var_prj = nn.Sequential(
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
-        self.mu_prj = nn.Linear(
-            self._ipa_conf.c_s, self._ipa_conf.c_s
+        self.mu_prj = nn.Sequential(
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
-        # self.decoder_init_rigid = nn.Sequential(
-        #     ipa_pytorch.StructureModuleTransition(c=self._ipa_conf.c_s),
-        #     ipa_pytorch.BackboneUpdate(self._ipa_conf.c_s, use_rot_updates=True),
-        # )
+        self.decoder_init_rigid = nn.Sequential(
+            ipa_pytorch.StructureModuleTransition(c=self._ipa_conf.c_s),
+            nn.Linear(self._ipa_conf.c_s, 3),)
 
     def _build_block(self, b, is_encoder):
 
@@ -94,8 +95,8 @@ class VQPAEBlock(nn.Module):
             norm_first=False,
             dropout=0.0,
         )
-        trunk[f'seq_tfmr_{b}'] = torch.nn.TransformerEncoder(
-            tfmr_layer, self._ipa_conf.seq_tfmr_num_layers)
+        # trunk[f'seq_tfmr_{b}'] = torch.nn.TransformerEncoder(
+        #     tfmr_layer, self._ipa_conf.seq_tfmr_num_layers)
         
         trunk[f'seq_tfmr_{b}'] = torch.nn.TransformerEncoder(
             tfmr_layer, self._ipa_conf.seq_tfmr_num_layers, enable_nested_tensor=False)
@@ -129,13 +130,11 @@ class VQPAEBlock(nn.Module):
         num_blocks = self.num_encoder_blocks if trunk_type == 'encoder' else self.num_decoder_blocks
         
         
-        for _ in range(3):
+        for _ in range(1):
             for b in range(num_blocks):
                 ipa_embed = trunk[f'ipa_{b}'](
                     node_embed, edge_embed, curr_rigids, node_mask)
                 ipa_embed *= node_mask[..., None]
-                node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
-                
                 node_embed = trunk[f'ipa_ln_{b}'](node_embed + ipa_embed)
                 seq_tfmr_out = trunk[f'seq_tfmr_{b}'](
                     node_embed, src_key_padding_mask=(1 - node_mask).bool())
@@ -151,8 +150,8 @@ class VQPAEBlock(nn.Module):
                 
                 rot = curr_rigids.get_rots().get_rot_mats()
                 trans = curr_rigids.get_trans()
-                node_embed, edge_embed = trunk[f'fea_fusion_{b}'](
-                    node_embed, edge_embed, rot, trans, node_mask, edge_mask)
+                node_embed = trunk[f'fea_fusion_{b}'](
+                    node_embed, rot, trans, node_mask)
                 
 
                 if b < num_blocks-1:
@@ -215,7 +214,7 @@ class VQPAEBlock(nn.Module):
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
         
-        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, need_poc=need_poc, hidden_str=None)
+        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, generate_mask, need_poc=need_poc, hidden_str=node_embed)
         # node_embed = node_embed[..., :-6] * node_mask[..., None]
         node_embed = node_embed * node_mask[..., None]
         
@@ -243,7 +242,7 @@ class VQPAEBlock(nn.Module):
             'pred_trans': pred_trans,
         }
         
-    def before_quntinized(self, node_embed, gen_mask):
+    def before_quntized(self, node_embed, gen_mask):
         gen_mask = gen_mask.bool()
         nodes_list = [node_embed[i][gen_mask[i]] for i in range(node_embed.shape[0])]
         size = 2 ** self.scales
@@ -253,7 +252,7 @@ class VQPAEBlock(nn.Module):
         
         return quantized
     
-    def after_quntinized(self, quantized, gen_mask):
+    def after_quntized(self, quantized, gen_mask):
         nodes = torch.split(quantized, 1)
         original_sizes = gen_mask.sum(1)
         quantized = self.interpolate_batch(
@@ -265,7 +264,6 @@ class VQPAEBlock(nn.Module):
     def fea_fusion(self, batch, node_mask=None):
         if node_mask is None:
             node_mask = batch['res_mask']
-        edge_mask = node_mask[:, None] * node_mask[:, :, None]
         
         num_batch, num_res = batch["seqs"].shape
         angles = batch["angles"] * node_mask[..., None]
@@ -277,12 +275,12 @@ class VQPAEBlock(nn.Module):
             self.angles_embedder(angles).reshape(num_batch,num_res,-1)
             ],dim=-1))
         
-        node_embed, edge_embed = self.str_fea_fusion(
-            node_embed, batch['edge_embed'], 
+        node_embed = self.str_fea_fusion(
+            node_embed, 
             batch['rotmats'], batch['trans'], 
-            node_mask, edge_mask
+            node_mask,
             )
-        return node_embed, edge_embed
+        return node_embed
         
     def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep"):
         """
@@ -293,11 +291,11 @@ class VQPAEBlock(nn.Module):
         """
         node_emb_raw = batch['node_embed']
         node_embed, node_mask, edge_mask, curr_rigids, _ = self.encoder_step(batch, mode)
-        quantized = self.before_quntinized(node_embed, node_mask) # TODO Add more choices for gen_mask
+        quantized = self.before_quntized(node_embed, gen_mask=batch['generate_mask']) # TODO Add more choices for gen_mask
         
-        quantized, commitment_loss, q_latent_loss = self.quantizer(node_embed)
+        quantized, commitment_loss, q_latent_loss = self.quantizer(quantized)
         
-        quantized = self.after_quntinized(quantized, gen_mask=batch['generate_mask'])
+        quantized = self.after_quntized(quantized, gen_mask=batch['generate_mask'])
         
         res = self.decoder_step(
             node_embed=quantized, node_emb_raw=node_emb_raw, edge_embed=batch['edge_embed'],
@@ -315,7 +313,7 @@ class VQPAEBlock(nn.Module):
         node_embed, node_mask, edge_mask, curr_rigids, logvar = self.encoder_step(
             batch, mode=mode
             )
-        interpolated_nodes = self.before_quntinized(node_embed, node_mask)
+        interpolated_nodes = self.before_quntized(node_embed, batch['generate_mask'])
         # First stage: VAE-only latent training, no quantization
         if self.quantizer.init_steps > 0:
             self.quantizer.init_steps -= 1        
@@ -323,10 +321,12 @@ class VQPAEBlock(nn.Module):
         # Secons stage: collect latent to initialise codebook words with k++ means, no quantization
         elif self.quantizer.collect_phase:
             self.quantizer.collect_samples(interpolated_nodes.detach())
-            
-        origin_node = self.after_quntinized(interpolated_nodes, node_mask)
+        
+        node, _, _ = self.quantizer(interpolated_nodes, vae_stage=True)
+        origin_node = self.after_quntized(node, batch['generate_mask'])
+        logvar = self.after_quntized(self.before_quntized(logvar, batch['generate_mask']), batch['generate_mask'])
         mu = origin_node
-        node_embed = reparameterize(mu, logvar) * node_mask[..., None]
+        node_embed = reparameterize(mu, logvar) * batch['generate_mask'][..., None]
 
         res = self.decoder_step(
             node_embed, batch['node_embed'], edge_embed=batch['edge_embed'],
@@ -335,9 +335,9 @@ class VQPAEBlock(nn.Module):
             mode=mode
         )
         res['vq_loss'] = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
-        res['vq_loss'] = res['vq_loss'] * node_mask[..., None]
-        res['vq_loss'] = res['vq_loss'].sum(dim=[1, 2]) / node_mask.sum(dim=[1])
-        res['vq_loss'] = res['vq_loss'].mean()
+        res['vq_loss'] = res['vq_loss'] * batch['generate_mask'][..., None]
+        res['vq_loss'] = res['vq_loss'].sum(dim=[1, 2]) /  batch['generate_mask'].sum(dim=[1])
+        res['vq_loss'] = res['vq_loss'].mean() * 0.1
         
         return res
     
@@ -367,7 +367,7 @@ class VQPAEBlock(nn.Module):
         node_embed, node_mask, edge_mask, curr_rigids, logvar = self.encoder_step(
             batch, mode=mode
         )
-        interpolated_nodes = self.before_quntinized(node_embed, gen_mask=batch['generate_mask'])
+        interpolated_nodes = self.before_quntized(node_embed, gen_mask=batch['generate_mask'])
 
         return self.quantizer.f_to_idxBl(interpolated_nodes)
     
@@ -376,7 +376,7 @@ class VQPAEBlock(nn.Module):
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
         curr_rigids = du.create_rigid(batch["rotmats"], batch["trans"])
         
-        quantized = self.after_quntinized(f_hat, gen_mask=batch['generate_mask'])
+        quantized = self.after_quntized(f_hat, gen_mask=batch['generate_mask'])
         
         res = self.decoder_step(
             node_embed=quantized, node_emb_raw=batch['node_embed'], edge_embed=batch['edge_embed'],
@@ -398,17 +398,17 @@ class VQPAEBlock(nn.Module):
         
         if isinstance(nodes, torch.Tensor):
             assert isinstance(to_sizes, int)
-            return F.interpolate(nodes.permute(0, 2, 1), size=to_sizes, mode='linear').permute(0, 2, 1)
+            return F.interpolate(nodes.permute(0, 2, 1), size=to_sizes, mode='nearest').permute(0, 2, 1)
         
         
         interpolated_nodes = []
         for idx, (node, size) in enumerate(zip(nodes, to_sizes)):
             if len(node.shape) < 3: node = node.unsqueeze(0)
             node = node.transpose(1, 2)
-            node = F.interpolate(node, size=(size if isinstance(size, int) else size.item()), mode='linear')
+            node = F.interpolate(node, size=(size if isinstance(size, int) else size.item()), mode='nearest')
             node = node.transpose(1, 2).squeeze(0)
 
-            # # Add padding if necessary
+            # # Add padding if necessary 
             if padding_size is not None:
                 padded = torch.zeros(padding_size, node.size(1), device=node.device)
                 padded[gen_mask[idx]] = node
@@ -418,18 +418,26 @@ class VQPAEBlock(nn.Module):
             
         return torch.stack(interpolated_nodes, dim=0)
     
-    def contex_filter(self, curr_rigids, poc_mask, res_mask, need_poc=False, hidden_str=None):
+    def contex_filter(self, curr_rigids, poc_mask, res_mask, gen_mask, need_poc=False, hidden_str=None):
         """获取空刚体"""
         B, L = poc_mask.shape
         res_mask = res_mask.bool()
+        gen_mask = gen_mask.bool()
         
         rotmats = torch.eye(3, device=poc_mask.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
         trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
         
         
+        
         if hidden_str is not None:
-            rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
-            trans[res_mask] = hidden_str[:, :, -3:][res_mask]
+            # torch.autograd.set_detect_anomaly(True)
+            # ridids = du.create_rigid(rotmats, trans)
+            str_vec = self.decoder_init_rigid(hidden_str * gen_mask[..., None]) * gen_mask[..., None]
+            # ridids = ridids.compose_q_update_vec(str_vec, gen_mask[..., None])
+            # rotmats[gen_mask] = ridids.get_rots().get_rot_mats()[gen_mask]
+            trans[gen_mask] = str_vec[gen_mask]
+            # rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
+            # trans[res_mask] = hidden_str[:, :, -3:][res_mask]
         
         if need_poc:
             rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]
@@ -464,23 +472,23 @@ class FeaFusionLayer(nn.Module):
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         self.dist_net = nn.Sequential(
-            nn.Linear(1, self._ipa_conf.c_z),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_z, self._ipa_conf.c_z),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_z, self._ipa_conf.c_z)
+            nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         
-    def forward(self, node_emb, edge_emb, rot, trans, node_mask, edge_mask):
+    def forward(self, node_emb, rot, trans, node_mask):
         # rot = rigid.get_rots().get_rot_mats()
         rot = so3_utils.rotmat_to_rotvec(rot)
         rot = self.rot_net(rot)
         # trans = rigid.get_trans() # B, L, 3
-        dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
-        dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
-        node_emb = node_emb + rot
+        # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
+        # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
+        node_emb = node_emb + rot + self.dist_net(trans)
         
-        edge_emb = edge_emb + dist
+        # edge_emb = edge_emb + dist
         
-        return node_emb * node_mask[..., None], edge_emb * edge_mask[..., None]
+        return node_emb * node_mask[..., None]
         
 
 

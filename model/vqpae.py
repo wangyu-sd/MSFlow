@@ -95,7 +95,7 @@ class VQPAE(nn.Module):
             "res_mask": res_mask,
         }
         
-        batched_res['node_embed'], batch['edge_embed'] = self.vqvae.fea_fusion(batched_res)
+        batched_res['node_embed'] = self.vqvae.fea_fusion(batched_res)
         
         return batched_res
     

@@ -23,7 +23,7 @@ class VectorQuantizer(nn.Module):
         self.collect_desired_size = collect_desired_size
         self.register_buffer("collected_samples", collected_samples)
         
-    def forward(self, f_BNC, col_samples=False):
+    def forward(self, f_BNC, col_samples=False, vae_stage=False):
         f_BCN = f_BNC.permute(0, 2, 1)
         B, C, N = f_BCN.shape
 
@@ -41,12 +41,15 @@ class VectorQuantizer(nn.Module):
                 if self.collect_phase and col_samples:
                     self.collected_samples = torch.cat((self.collected_samples, rest_NC), dim=0)
                 
-                d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
-                d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
-                idx_N = torch.argmin(d_no_grad, dim=1)
-
-                idx_Bn = idx_N.view(B, pn)
-                h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
+                if vae_stage:
+                    h_BCn = F.interpolate(rest_NC.reshape(B, -1, C).permute(0, 2, 1), size=(N), mode='nearest').contiguous()
+                else:                 
+                    d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
+                    d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
+                    
+                    idx_N = torch.argmin(d_no_grad, dim=1)
+                    idx_Bn = idx_N.view(B, pn)
+                    h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='nearest').contiguous()
 
                 f_hat = f_hat + h_BCn
                 f_rest -= h_BCn
