@@ -68,7 +68,8 @@ class VectorQuantizer(nn.Module):
         
     def get_softvq(self, rest_NC, B, pn, C, N):
         d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
-        d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1).softmax_(dim=-1)
+        d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
+        d_no_grad = d_no_grad.softmax(dim=-1)
         
         h_NC_soft = d_no_grad @ self.embedding.weight.T # (N, num_codebook) @ (num_codebook, C) = (N, C)
         # idx_N = torch.argmin(d_no_grad, dim=1)
