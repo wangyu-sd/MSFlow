@@ -42,14 +42,14 @@ class VectorQuantizer(nn.Module):
                     self.collected_samples = torch.cat((self.collected_samples, rest_NC), dim=0)
                 
                 if vae_stage:
-                    h_BCn = F.interpolate(rest_NC.reshape(B, -1, C).permute(0, 2, 1), size=(N), mode='nearest').contiguous()
+                    h_BCn = F.interpolate(rest_NC.reshape(B, -1, C).permute(0, 2, 1), size=(N), mode='linear').contiguous()
                 else:                 
                     d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
                     d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
                     
                     idx_N = torch.argmin(d_no_grad, dim=1)
                     idx_Bn = idx_N.view(B, pn)
-                    h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='nearest').contiguous()
+                    h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
 
                 f_hat = f_hat + h_BCn
                 f_rest -= h_BCn

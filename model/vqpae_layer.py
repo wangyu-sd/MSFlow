@@ -402,14 +402,14 @@ class VQPAEBlock(nn.Module):
         
         if isinstance(nodes, torch.Tensor):
             assert isinstance(to_sizes, int)
-            return F.interpolate(nodes.permute(0, 2, 1), size=to_sizes, mode='nearest').permute(0, 2, 1)
+            return F.interpolate(nodes.permute(0, 2, 1), size=to_sizes, mode='linear').permute(0, 2, 1)
         
         
         interpolated_nodes = []
         for idx, (node, size) in enumerate(zip(nodes, to_sizes)):
             if len(node.shape) < 3: node = node.unsqueeze(0)
             node = node.transpose(1, 2)
-            node = F.interpolate(node, size=(size if isinstance(size, int) else size.item()), mode='nearest')
+            node = F.interpolate(node, size=(size if isinstance(size, int) else size.item()), mode='linear')
             node = node.transpose(1, 2).squeeze(0)
 
             # # Add padding if necessary 
