@@ -117,7 +117,7 @@ class PAR(nn.Module):
         # SOS token
         poc_cond = self.poc_emb(poc_cond) # B, Cvae
         poc_cond = poc_cond * (torch.rand((B, 1), device=poc_cond.device) > self.cond_drop_rate)
-        sos = poc_cond # B, C
+        sos = poc_cond # B, Cs
         cond_BD = poc_cond
         sos = sos.unsqueeze(1).expand(B, self.first_l, -1) + self.pos_start.expand(B, self.first_l, -1) # B, 1, C => SOS embedding (not token anymore)
 

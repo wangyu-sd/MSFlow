@@ -162,8 +162,8 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:1')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/log_par/learn_all[main-d443eff]_2025_04_23__15_00_18/checkpoints/330000.pt")
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-d443eff]_2025_04_22__15_49_49/checkpoints/2000.pt")
+    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-26d5e96]_2025_04_27__16_28_29/checkpoints/10000.pt")
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/log_par/learn_all[main-572fdc6]_2025_04_27__17_45_18/checkpoints/6000.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 

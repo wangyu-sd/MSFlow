@@ -234,7 +234,7 @@ if __name__ == '__main__':
             'time_backward': (time_backward_end - time_forward_end) / 1000,
         })
         if not args.debug:
-            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger, counter=count)
+            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger, counter=None)
 
     def validate(it, mode):
         scalar_accum = ScalarMetricAccumulator()
