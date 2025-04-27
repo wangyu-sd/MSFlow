@@ -173,7 +173,7 @@ class VQPAE(nn.Module):
         angle_loss = torch.mean(angle_loss)
         
 
-        res =  {
+        res_ =  {
             "trans_loss": trans_loss * weigeht,
             'rot_loss': rot_loss * weigeht,
             'bb_atom_loss': bb_atom_loss * weigeht,
@@ -183,8 +183,8 @@ class VQPAE(nn.Module):
         
         for key in res.keys():
             if "loss" in key:
-                res[key] = res[key] * weigeht
-        return res
+                res_[key] = res[key] * weigeht
+        return res_
         
       
     

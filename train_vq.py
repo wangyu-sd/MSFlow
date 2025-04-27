@@ -34,7 +34,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-f9af765]_2025_04_27__15_53_37/checkpoints/5002_coodbook.pt")
+    # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-f9af765]_2025_04_27__15_53_37/checkpoints/5002_coodbook.pt")
+    parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
     args = parser.parse_args()
@@ -50,9 +51,9 @@ if __name__ == '__main__':
 
     # Load configs
     
-    if args.from_pretrain:
-        path = os.path.dirname(os.path.dirname(args.from_pretrain))
-        args.config = os.path.join(path, args.config.split('/')[-1])
+    # if args.from_pretrain:
+    #     path = os.path.dirname(os.path.dirname(args.from_pretrain))
+    #     args.config = os.path.join(path, args.config.split('/')[-1])
     
     config, config_name = load_config(args.config)
     seed_all(config.train.seed)
