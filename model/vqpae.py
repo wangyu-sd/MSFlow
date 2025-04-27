@@ -56,8 +56,8 @@ class VQPAE(nn.Module):
         self.node_embedder = NodeEmbedder(cfg.encoder.node_embed_size,max_num_heavyatoms)
         self.edge_embedder = EdgeEmbedder(cfg.encoder.edge_embed_size,max_num_heavyatoms)
         self.vqvae: VQPAEBlock = VQPAEBlock(cfg.encoder.ipa)
-        self.node_proj = nn.Linear(cfg.encoder.node_embed_size, cfg.encoder.ipa.c_s)
-        self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
+        # self.node_proj = nn.Linear(cfg.encoder.node_embed_size, cfg.encoder.ipa.c_s)
+        # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
     
         
     
@@ -79,8 +79,8 @@ class VQPAE(nn.Module):
         
         
         # num_batch, num_res = batch['aa'].shape
-        node_embed = self.node_proj(node_embed) # (B,L,C)
-        edge_embed = self.edge_proj(edge_embed) # (B,L,C)
+        # node_embed = self.node_proj(node_embed) # (B,L,C)
+        # edge_embed = self.edge_proj(edge_embed) # (B,L,C)
         gen_mask,res_mask, angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
         trans_1, _ = self.zero_center_part(trans_1, gen_mask, res_mask)
         

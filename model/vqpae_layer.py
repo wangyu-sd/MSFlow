@@ -68,11 +68,13 @@ class VQPAEBlock(nn.Module):
             self._build_block(b, is_encoder=False)
             
         self.var_prj = nn.Sequential(
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), 
+            nn.LayerNorm(self._ipa_conf.c_s), nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         self.mu_prj = nn.Sequential(
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
+            nn.LayerNorm(self._ipa_conf.c_s), nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         # self.decoder_init_rigid = nn.Sequential(
