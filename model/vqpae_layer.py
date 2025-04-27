@@ -482,12 +482,16 @@ class FeaFusionLayer(nn.Module):
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s // 2),
         )
         self.fusion = nn.Sequential(
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s*2),
+            nn.LayerNorm(self._ipa_conf.c_s*2),
+            nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s),
+            nn.LayerNorm(self._ipa_conf.c_s),
+            nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
         
-    def forward(self, node_emb, rot, trans, node_mask):
+    def forward(self, node_emb, rot, dist, node_mask):
         # rot = rigid.get_rots().get_rot_mats()
         rot = so3_utils.rotmat_to_rotvec(rot)
         rot = self.rot_net(rot)
@@ -495,7 +499,7 @@ class FeaFusionLayer(nn.Module):
         # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
         # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
         node_emb_ = self.fusion(torch.cat(
-            [node_emb, rot, self.dist_net(trans/100)], dim=-1
+            [node_emb, rot, self.dist_net(dist/100)], dim=-1
         ))
         node_emb = node_emb_ + node_emb
         
