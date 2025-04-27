@@ -337,7 +337,7 @@ class VQPAEBlock(nn.Module):
         res['vq_loss'] = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
         res['vq_loss'] = res['vq_loss'] * batch['generate_mask'][..., None]
         res['vq_loss'] = res['vq_loss'].sum(dim=[1, 2]) /  batch['generate_mask'].sum(dim=[1])
-        res['vq_loss'] = res['vq_loss'].mean() * 0.1
+        res['vq_loss'] = res['vq_loss'].mean() * 0.05
         
         return res
     
