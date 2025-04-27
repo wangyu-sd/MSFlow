@@ -14,7 +14,7 @@ model:
       num_encoder_blocks: 4
       num_decoder_blocks: 4
       stop_grad: False
-      codebook_size: 4096
+      codebook_size: 512
       # codebook_dim: 32
       commitment_cost: 0.25
       init_steps: 5000
@@ -59,7 +59,7 @@ train:
     commitment_loss: 0.5
     q_latent_loss: 0.5
   max_iters: 400000000
-  val_freq: 2000
+  val_freq: 5000
   batch_size: 10
   batch_size_pr: 10
   accum_grad: 1

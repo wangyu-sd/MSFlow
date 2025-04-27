@@ -4,7 +4,6 @@ from torch.nn import functional as F
 from scipy.cluster.vq import kmeans2
 from typing import List
 
-
 class VectorQuantizer(nn.Module):
     def __init__(self, codebook_size, embedding_dim, commitment_cost, init_steps, collect_desired_size, scales):
         super().__init__()
@@ -60,10 +59,10 @@ class VectorQuantizer(nn.Module):
             
             mean_commitment_loss *= 1. / SN
             mean_q_latent_loss *= 1. / SN
-
+            
             f_hat = (f_hat.data - f_no_grad).add_(f_BCN)
             f_hat = f_hat.permute(0, 2, 1) # B, N, C
-            
+            # print(self.embedding.weight.data[219, :10])
             return f_hat, mean_commitment_loss, mean_q_latent_loss
         
     def get_softvq(self, rest_NC, B, pn, C, N):
