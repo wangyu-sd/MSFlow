@@ -6,18 +6,18 @@ model:
       c_s: 128 #${model.node_embed_size}
       c_z: 64 #${model.edge_embed_size}
       c_hidden: 128
-      no_heads: 8
-      no_qk_points: 8
-      no_v_points: 12
+      no_heads: 4
+      no_qk_points: 4
+      no_v_points: 8
       seq_tfmr_num_heads: 4
       seq_tfmr_num_layers: 2
-      num_encoder_blocks: 5
-      num_decoder_blocks: 5
+      num_encoder_blocks: 4
+      num_decoder_blocks: 4
       stop_grad: False
       codebook_size: 512
       # codebook_dim: 32
       commitment_cost: 0.25
-      init_steps: 1000
+      init_steps: 2000
       collect_desired_size: 9000
       scales: 8
 

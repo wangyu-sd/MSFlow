@@ -75,9 +75,9 @@ class VQPAEBlock(nn.Module):
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
-        self.decoder_init_rigid = nn.Sequential(
-            ipa_pytorch.StructureModuleTransition(c=self._ipa_conf.c_s),
-            nn.Linear(self._ipa_conf.c_s, 3),)
+        # self.decoder_init_rigid = nn.Sequential(
+        #     ipa_pytorch.StructureModuleTransition(c=self._ipa_conf.c_s),
+        #     nn.Linear(self._ipa_conf.c_s, 3),)
 
     def _build_block(self, b, is_encoder):
 
@@ -432,12 +432,13 @@ class VQPAEBlock(nn.Module):
         if hidden_str is not None:
             # torch.autograd.set_detect_anomaly(True)
             # ridids = du.create_rigid(rotmats, trans)
-            str_vec = self.decoder_init_rigid(hidden_str * gen_mask[..., None]) * gen_mask[..., None]
+            # str_vec = self.decoder_init_rigid(hidden_str * gen_mask[..., None]) * gen_mask[..., None]
             # ridids = ridids.compose_q_update_vec(str_vec, gen_mask[..., None])
             # rotmats[gen_mask] = ridids.get_rots().get_rot_mats()[gen_mask]
-            trans[gen_mask] = str_vec[gen_mask]
+            # trans[gen_mask] = str_vec[gen_mask]
             # rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
             # trans[res_mask] = hidden_str[:, :, -3:][res_mask]
+            pass
         
         if need_poc:
             rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]
