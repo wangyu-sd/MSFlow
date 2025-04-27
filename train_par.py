@@ -28,6 +28,64 @@ add_safe_globals([easydict.EasyDict])
 
 from model.vqpae import VQPAE
 
+from collections import defaultdict
+import heapq
+import numpy as np
+
+class DynamicIndexStats:
+    def __init__(self):
+        self.counter = defaultdict(int)  # 索引计数器
+        self.total = 0                  # 总索引数
+        # self.history = []                # 历史批次轨迹（可选）
+
+    def update(self, batch_indices):
+        """
+        
+        参数:
+            batch_indices: 形状为[B, L]的二维索引数组/张量
+        """
+        # 展平处理并转换类型
+        if isinstance(batch_indices, (torch.Tensor, np.ndarray)):
+            flat_indices = batch_indices.reshape(-1).tolist()
+        else:
+            flat_indices = [i for row in batch_indices for i in row]
+        
+        # 增量更新计数器
+        for idx in flat_indices:
+            self.counter[idx] += 1
+        self.total += len(flat_indices)
+        # self.history.append(flat_indices)  # 可选历史记录
+
+    def get_freq_stats(self):
+        """获取频率统计结果
+        
+        返回:
+            {
+                'top5': [(index, 归一化频率), ...], 
+                'bottom5': [(index, 归一化频率), ...]
+            }
+        """
+        if self.total == 0:
+            return {'top5': [], 'bottom5': []}
+
+        # 获取最高频率前5项
+        top5 = heapq.nlargest(5, self.counter.items(), key=lambda x: x[1])
+        # 获取最低频率后5项
+        bottom5 = heapq.nsmallest(5, self.counter.items(), key=lambda x: x[1])
+        
+        # 计算归一化频率[6]
+        normalized = lambda x: (x[0], round(x[1]/self.total, 4))
+        return {
+            'top5': [normalized(item) for item in top5],
+            'bottom5': [normalized(item) for item in bottom5]
+        }
+
+    def reset(self):
+        """重置统计器"""
+        self.counter.clear()
+        self.total = 0
+        # self.history = []
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
@@ -129,6 +187,7 @@ if __name__ == '__main__':
         
         
     model = model_par
+    count = DynamicIndexStats()
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
@@ -139,6 +198,8 @@ if __name__ == '__main__':
         logits_BLV, gt_BL = model(batch) # get loss and metrics
         loss = F.cross_entropy(logits_BLV.view(-1, logits_BLV.size(-1)), gt_BL.view(-1), reduction='none')
         loss = loss.mean()
+        
+        count.update(gt_BL)
         
         # loss = loss / config.train.accum_grad
         time_forward_end = current_milli_time()
@@ -173,7 +234,7 @@ if __name__ == '__main__':
             'time_backward': (time_backward_end - time_forward_end) / 1000,
         })
         if not args.debug:
-            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger)
+            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger, counter=count)
 
     def validate(it, mode):
         scalar_accum = ScalarMetricAccumulator()
@@ -221,4 +282,7 @@ if __name__ == '__main__':
                 }, ckpt_path)
     except KeyboardInterrupt:
         logger.info('Terminating...')
+        
+        
+
         

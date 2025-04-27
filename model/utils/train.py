@@ -60,7 +60,7 @@ def get_warmup_sched(cfg, optimizer):
     return warmup_sched
 
 
-def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, it, tag, logger=BlackHole(), writer=BlackHole()):
+def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, it, tag, logger=BlackHole(), writer=BlackHole(), counter=None):
     
     if it % 20 == 0:
         logstr = '[%s] Iter %05d' % (tag, it)
@@ -75,6 +75,11 @@ def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, i
 
         for k, v in scalar_dict.items():
             logstr += ' | %s %.4f' % (k, v.item() if isinstance(v, torch.Tensor) else v)
+        
+        if counter is not None:
+            stats = counter.get_freq_stats()
+            for name, counter in stats.items():
+                logstr += f' | {name}:{counter}'
         logger.info(logstr)
     
     
