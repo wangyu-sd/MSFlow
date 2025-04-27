@@ -71,7 +71,7 @@ class VectorQuantizer(nn.Module):
         d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
         d_no_grad = d_no_grad.softmax(dim=-1)
         
-        h_NC_soft = d_no_grad @ self.embedding.weight.T # (N, num_codebook) @ (num_codebook, C) = (N, C)
+        h_NC_soft = d_no_grad @ self.embedding.weight # (N, num_codebook) @ (num_codebook, C) = (N, C)
         # idx_N = torch.argmin(d_no_grad, dim=1)
         h_BCn = h_NC_soft.view(B, pn, C).permute(0, 2, 1) # (B, C, N)
         h_BCn = F.interpolate(h_BCn, size=(N), mode='linear').contiguous()
@@ -137,7 +137,7 @@ class VectorQuantizer(nn.Module):
         # f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
         pn_next = self.scales[0]
         for si in range(SN-1):
-            h = gt_idx_Bl[si] @ self.embedding.weight.T # B, pn, C
+            h = gt_idx_Bl[si] @ self.embedding.weight # B, pn, C
             h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(pn_next * 2), mode='linear')
             #From: 0,   1, 1, 2, 2, 2, 2
             #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
