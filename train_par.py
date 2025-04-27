@@ -33,11 +33,11 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
     parser.add_argument('--logdir', type=str, default="/remote-home/wangyu/VQ-PAR/log_par")
     parser.add_argument('--debug', action='store_true', default=False)
-    parser.add_argument('--device', type=str, default='cuda:0')
+    parser.add_argument('--device', type=str, default='cuda:1')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-d443eff]_2025_04_22__15_49_49/checkpoints/2000.pt")
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-26d5e96]_2025_04_27__16_28_29/checkpoints/10000.pt")
     # /remote-home/wangyu/VQ-PAR/log_par/learn_all[main-d443eff]_2025_04_23__15_00_18/checkpoints/36000.pt
     parser.add_argument('--name', type=str, default='train_par')
     # parser.add_argument('--codebook_init', default=False, action='store_true')
