@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -228,6 +229,7 @@ class VQPAEBlock(nn.Module):
         # 输出预测
         pred_seqs = self.seq_net(node_embed)
         pred_angles = self.angle_net(node_embed)
+        pred_angles = pred_angles % (2*math.pi) 
         pred_trans = curr_rigids.get_trans()
         pred_rotmats = curr_rigids.get_rots().get_rot_mats()
         
