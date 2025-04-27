@@ -44,13 +44,13 @@ class VectorQuantizer(nn.Module):
                 if vae_stage:
                     h_BCn = F.interpolate(rest_NC.reshape(B, -1, C).permute(0, 2, 1), size=(N), mode='linear').contiguous()
                 else:                 
-                    # d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
-                    # d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
-                    # idx_N = torch.argmin(d_no_grad, dim=1)
-                    # idx_Bn = idx_N.view(B, pn)
-                    # h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
+                    d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
+                    d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
+                    idx_N = torch.argmin(d_no_grad, dim=1)
+                    idx_Bn = idx_N.view(B, pn)
+                    h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
                     
-                    h_BCn, _ = self.get_softvq(rest_NC, B, pn, C, N)
+                    # h_BCn, _ = self.get_softvq(rest_NC, B, pn, C, N)
 
                 f_hat = f_hat + h_BCn
                 f_rest -= h_BCn
@@ -71,7 +71,7 @@ class VectorQuantizer(nn.Module):
         d_no_grad.addmm_(rest_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
         d_no_grad = d_no_grad.softmax(dim=-1)
         
-        h_NC_soft = d_no_grad @ self.embedding.weight # (N, num_codebook) @ (num_codebook, C) = (N, C)
+        h_NC_soft = d_no_grad @ self.embedding.weight.data # (N, num_codebook) @ (num_codebook, C) = (N, C)
         # idx_N = torch.argmin(d_no_grad, dim=1)
         h_BCn = h_NC_soft.view(B, pn, C).permute(0, 2, 1) # (B, C, N)
         h_BCn = F.interpolate(h_BCn, size=(N), mode='linear').contiguous()
@@ -111,21 +111,22 @@ class VectorQuantizer(nn.Module):
         SN = len(self.scales)
         for si, pn in enumerate(self.scales):
             # Find the nearest embedding
-            # z_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
-            # d_no_grad = torch.sum(z_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
-            # d_no_grad.addmm_(z_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
-            # idx_N = torch.argmin(d_no_grad, dim=1)
+            z_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
+            d_no_grad = torch.sum(z_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
+            d_no_grad.addmm_(z_NC, self.embedding.weight.data.T, alpha=-2, beta=1)
+            idx_N = torch.argmin(d_no_grad, dim=1)
             
-            # idx_Bn = idx_N.view(B, pn)
-            # h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
-            # f_hat.add_(h_BCn)
-            # f_rest.sub_(h_BCn)
-            z_NC = F.interpolate(f_rest, size=(pn), mode='linear').permute(0, 2, 1).reshape(-1, C)
-            h_BCn, d_no_grad = self.get_softvq(z_NC, B, pn, C, N)
+            idx_Bn = idx_N.view(B, pn)
+            h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
             f_hat.add_(h_BCn)
             f_rest.sub_(h_BCn)
+            
+            # z_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
+            # h_BCn, d_no_grad = self.get_softvq(z_NC, B, pn, C, N)
+            # f_hat.add_(h_BCn)
+            # f_rest.sub_(h_BCn)
 
-            idx_Bl.append(d_no_grad.reshape(B, pn, C))
+            idx_Bl.append(idx_Bn.reshape(B, pn))
         
         return idx_Bl
     
@@ -137,7 +138,7 @@ class VectorQuantizer(nn.Module):
         # f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
         pn_next = self.scales[0]
         for si in range(SN-1):
-            h = gt_idx_Bl[si] @ self.embedding.weight # B, pn, C
+            h = self.embedding(gt_idx_Bl[si])
             h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(pn_next * 2), mode='linear')
             #From: 0,   1, 1, 2, 2, 2, 2
             #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
