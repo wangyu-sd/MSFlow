@@ -34,7 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-b35108e]_2025_04_26__18_42_13/checkpoints/1002_coodbook.pt")
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-f9af765]_2025_04_27__15_53_37/checkpoints/5002_coodbook.pt")
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
     args = parser.parse_args()
