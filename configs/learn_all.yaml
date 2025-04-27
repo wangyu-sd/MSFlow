@@ -55,7 +55,9 @@ train:
     seqs_loss: 1.0
     angle_loss: 1.0
     torsion_loss: 0.5
-    vq_loss: 0.5
+    vae_loss: 0.5
+    commitment_loss: 0.5
+    q_latent_loss: 0.5
   max_iters: 400000000
   val_freq: 2000
   batch_size: 10

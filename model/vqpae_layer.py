@@ -307,7 +307,8 @@ class VQPAEBlock(nn.Module):
             res_mask=batch['res_mask'], generate_mask=batch['generate_mask'],
             mode=mode,
         )
-        res['vq_loss'] = commitment_loss + q_latent_loss
+        res['commitment_loss'] = commitment_loss
+        res['q_latent_loss'] = q_latent_loss
 
         return res
 
@@ -339,10 +340,10 @@ class VQPAEBlock(nn.Module):
             res_mask=batch['res_mask'], generate_mask=batch['generate_mask'],
             mode=mode
         )
-        res['vq_loss'] = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
-        res['vq_loss'] = res['vq_loss'] * batch['generate_mask'][..., None]
-        res['vq_loss'] = res['vq_loss'].sum(dim=[1, 2]) /  batch['generate_mask'].sum(dim=[1])
-        res['vq_loss'] = res['vq_loss'].mean() * 0.01
+        res['vae_loss'] = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+        res['vae_loss'] = res['vae_loss'] * batch['generate_mask'][..., None]
+        res['vae_loss'] = res['vae_loss'].sum(dim=[1, 2]) /  batch['generate_mask'].sum(dim=[1])
+        res['vae_loss'] = res['vae_loss'].mean() * 0.01
         
         return res
     
@@ -361,10 +362,10 @@ class VQPAEBlock(nn.Module):
             res_mask=batch['res_mask'], generate_mask=batch['generate_mask'],
             mode=mode
         )
-        res['vq_loss'] = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
-        res['vq_loss'] = res['vq_loss'] * node_mask[..., None]
-        res['vq_loss'] = res['vq_loss'].sum(dim=[1, 2]) / node_mask.sum(dim=[1])
-        res['vq_loss'] = res['vq_loss'].mean()
+        res['vae_loss'] = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+        res['vae_loss'] = res['vae_loss'] * node_mask[..., None]
+        res['vae_loss'] = res['vae_loss'].sum(dim=[1, 2]) / node_mask.sum(dim=[1])
+        res['vae_loss'] = res['vae_loss'].mean()
         return res
         
     

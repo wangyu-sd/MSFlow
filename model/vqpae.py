@@ -115,8 +115,8 @@ class VQPAE(nn.Module):
 
       
     def get_loss(self, res, fea_dict, mode, weigeht=1.):
-        pred_trans, pred_rotmats, pred_angles, pred_seqs_prob, vq_loss = \
-            res['pred_trans'], res['pred_rotmats'], res['pred_angles'], res['pred_seqs'], res['vq_loss']
+        pred_trans, pred_rotmats, pred_angles, pred_seqs_prob = \
+            res['pred_trans'], res['pred_rotmats'], res['pred_angles'], res['pred_seqs']
         
         trans, rotamats, angles, seqs = \
             fea_dict['trans'], fea_dict['rotmats'], fea_dict['angles'], fea_dict['seqs']
@@ -173,14 +173,18 @@ class VQPAE(nn.Module):
         angle_loss = torch.mean(angle_loss)
         
 
-        return {
+        res =  {
             "trans_loss": trans_loss * weigeht,
             'rot_loss': rot_loss * weigeht,
             'bb_atom_loss': bb_atom_loss * weigeht,
             'seqs_loss': seqs_loss * weigeht,
             'angle_loss': angle_loss * weigeht,
-            'vq_loss': vq_loss * weigeht,
         }
+        
+        for key in res.keys():
+            if "loss" in key:
+                res[key] = res[key] * weigeht
+        return res
         
       
     
