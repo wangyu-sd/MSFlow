@@ -123,7 +123,11 @@ class VQPAE(nn.Module):
             # 取前三个残基定义局部坐标系
             v1 = coords[..., 1, :] - coords[..., 0, :]
             v2 = coords[..., 2, :] - coords[..., 1, :]
+            
+            v1 = v1 / torch.norm(v1, dim=-1, keepdim=True)  # [B, L, 3]
+            v2 = v2 / torch.norm(v2, dim=-1, keepdim=True)  # [B, L, 3]
             normal = torch.cross(v1, v2, dim=-1)
+            normal = normal / torch.norm(normal, dim=-1, keepdim=True)  # [B, L, 3]
             return torch.stack([v1, v2, normal], dim=-1)  # [B, 3, 3]
         
         pred_frames = local_transform(pred_coords)
