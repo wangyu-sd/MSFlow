@@ -166,7 +166,7 @@ class VQPAE(nn.Module):
         trans_loss = torch.mean(trans_loss)
         
         
-        strc_loss = self.strc_loss_fn(pred_trans_c, trans_loss, gen_mask)
+        strc_loss = self.strc_loss_fn(pred_trans_c, trans, gen_mask)
         
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotmats) 
@@ -293,7 +293,7 @@ class ProteinStructureLoss(nn.Module):
         mask:   [B, L]
         """
         valid = mask.sum(dim=-1).clamp(min=1e-6)
-        loss = (tensor * mask.unsqueeze(-1)).sum(dim=[1, 2]) / valid
+        loss = (tensor * mask).sum(dim=-1) / valid
         return loss.mean()
 
     def position_loss(self, pred, target, mask):
@@ -343,8 +343,8 @@ class ProteinStructureLoss(nn.Module):
         v3 = p3 - p2
         
         # 计算法向量
-        n1 = torch.cross(v1, v2)  # 平面p0-p1-p2的法向量
-        n2 = torch.cross(v2, v3)  # 平面p1-p2-p3的法向量
+        n1 = torch.linalg.cross(v1, v2)  # 平面p0-p1-p2的法向量
+        n2 = torch.linalg.cross(v2, v3)  # 平面p1-p2-p3的法向量
         
         # 计算夹角
         cos_phi = torch.sum(n1 * n2, dim=-1) / (
@@ -418,10 +418,10 @@ class ProteinStructureLoss(nn.Module):
         # 主损失项
         pred = self.extract_fea_from_gen(pred, gen_mask)
         target = self.extract_fea_from_gen(target, gen_mask)
-        mask = self.extract_fea_from_gen(mask, gen_mask)
+        mask = self.extract_fea_from_gen(gen_mask, gen_mask)
         
         
-        pos_loss = self.position_loss(pred, target, mask)
+        # pos_loss = self.position_loss(pred, target, mask)
         angle_loss = self.angle_loss(pred, target, mask)
         torsion_loss = self.torsion_loss(pred, target, mask)
         dist_loss, clash_loss = self.dist_and_clash_loss(pred, target, mask)
@@ -430,7 +430,7 @@ class ProteinStructureLoss(nn.Module):
         # 动态权重设置(参考Distance-AF[3](@ref))
         
         return {
-            'pos_loss': pos_loss,
+            # 'pos_loss': pos_loss,
             'bb_angle_loss': angle_loss,
             'bb_torsion_loss': torsion_loss,
             'dist_loss': dist_loss,

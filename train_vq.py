@@ -129,8 +129,9 @@ if __name__ == '__main__':
         logger.info(f'Loading pretrain model states from {args.from_pretrain}')
         model.load_state_dict(ckpt['model'], strict=False)
         logger.info('Done!')
-        
-    print("Current Loger Dir: %s" % log_dir)
+    
+    if not args.debug:
+        print("Current Loger Dir: %s" % log_dir)
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
