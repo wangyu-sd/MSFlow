@@ -181,6 +181,7 @@ class VQPAE(nn.Module):
         mask = (dist_gen_pred < 3.8) & (dist_gen_pred > 2.0)  # 排除相邻残基
         clash = torch.where(mask, (3.8 - dist_gen_pred).pow(2), 0.0)
         clash_loss = torch.sum(clash, dim=(-1,-2)) / (torch.sum(dist_mask,dim=(-1,-2)) + 1e-8) # (B,)
+        clash_loss = torch.mean(clash_loss)
         fape_loss = self.fape_loss(trans_pred_gen, trans_true_gen, gen_mask_sm)
         # dist_loss = 0.
         # clash_loss = 0.
