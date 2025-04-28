@@ -167,8 +167,8 @@ class VQPAE(nn.Module):
         dist_loss = 0.
         clash_loss = 0.
         for i in range(gen_mask.size(0)):
-            dist_i = torch.cdist(trans_pred_list[i])
-            dist_j = torch.cdist(trans_true_list[i])
+            dist_i = torch.cdist(trans_pred_list[i], trans_pred_list[i])
+            dist_j = torch.cdist(trans_true_list[i], trans_true_list[i])
             dist_loss += torch.mean((dist_i - dist_j).pow(2))
             
             mask = (dist_j < 3.8) & (dist_j > 2.0)  # 排除相邻残基
