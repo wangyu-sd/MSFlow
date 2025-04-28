@@ -134,6 +134,8 @@ class VQPAE(nn.Module):
         loss = (diff.pow(2)).sum(-1) * mask.unsqueeze(-1)
         loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)  # [B, L, 3]
         return loss.mean()
+    
+    
 
 
 
@@ -163,10 +165,15 @@ class VQPAE(nn.Module):
         trans_pred_list = [pred_trans_c[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         trans_true_list = [trans[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         dist_loss = 0.
+        clash_loss = 0.
         for i in range(gen_mask.size(0)):
             dist_i = torch.cdist(trans_pred_list[i])
             dist_j = torch.cdist(trans_true_list[i])
             dist_loss += torch.mean((dist_i - dist_j).pow(2))
+            
+            mask = (dist_j < 3.8) & (dist_j > 2.0)  # 排除相邻残基
+            clash = torch.where(mask, (3.8 - dist_i).pow(2), 0.0)
+            clash_loss += torch.mean(clash)
         dist_loss = dist_loss / gen_mask.size(0)
         fpae_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
         
@@ -215,6 +222,7 @@ class VQPAE(nn.Module):
             'angle_loss': angle_loss * weigeht,
             'dist_loss': dist_loss * weigeht,
             'fpae_loss': fpae_loss * weigeht,
+            "clash_loss": clash_loss * weigeht,
         }
         
         for key in res.keys():
