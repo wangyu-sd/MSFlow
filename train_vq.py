@@ -123,7 +123,7 @@ if __name__ == '__main__':
         logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
         ckpt = torch.load(args.from_pretrain, map_location=args.device)
         logger.info(f'Loading pretrain model states from {args.from_pretrain}')
-        model.load_state_dict(ckpt['model'])
+        model.load_state_dict(ckpt['model'], strict=False)
         logger.info('Done!')
         
         
