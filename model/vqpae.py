@@ -59,8 +59,7 @@ class VQPAE(nn.Module):
         self.vqvae: VQPAEBlock = VQPAEBlock(cfg.encoder.ipa)
         # self.node_proj = nn.Linear(cfg.encoder.node_embed_size, cfg.encoder.ipa.c_s)
         # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
-    
-        
+                
     
     def extract_fea(self, batch):
         rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])      
@@ -69,14 +68,14 @@ class VQPAE(nn.Module):
 
         angles_1 = batch['torsion_angle']
 
-        context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
-        structure_mask = context_mask 
-        sequence_mask = context_mask 
+        # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
+        # structure_mask = context_mask 
+        # sequence_mask = context_mask 
         
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
-                                        batch['mask_heavyatom'], structure_mask=structure_mask, sequence_mask=sequence_mask)
+                                        batch['mask_heavyatom'], structure_mask=batch['res_mask'], sequence_mask=batch['res_mask'])
         edge_embed = self.edge_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
-                                        batch['mask_heavyatom'], structure_mask=structure_mask, sequence_mask=sequence_mask)
+                                        batch['mask_heavyatom'], structure_mask=batch['res_mask'], sequence_mask=batch['res_mask'])
         
         
         # num_batch, num_res = batch['aa'].shape
@@ -111,7 +110,7 @@ class VQPAE(nn.Module):
         # center = 0. it seems not center didnt influence the result, but its good for training stabilty
         pos = pos - center
         pos = pos * res_mask[...,None]
-        return pos,center
+        return pos, center
     
     
     def fape_loss(self, pred_coords, true_coords, mask):

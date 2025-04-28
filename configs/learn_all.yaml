@@ -17,7 +17,7 @@ model:
       codebook_size: 512
       # codebook_dim: 32
       commitment_cost: 0.25
-      init_steps: 5000
+      init_steps: 50000
       collect_desired_size: 9000
       scales: 8
 

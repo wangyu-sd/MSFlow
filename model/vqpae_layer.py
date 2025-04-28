@@ -123,7 +123,7 @@ class VQPAEBlock(nn.Module):
             )
             
 
-    def _process_trunk(self, trunk_type, node_embed, edge_embed, curr_rigids, node_mask, edge_mask):
+    def _process_trunk(self, trunk_type, node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask):
         """通用主干处理流程"""
         x = node_embed
         
@@ -154,7 +154,7 @@ class VQPAEBlock(nn.Module):
                 rot = curr_rigids.get_rots().get_rot_mats()
                 trans = curr_rigids.get_trans()
                 node_embed = trunk[f'fea_fusion_{b}'](
-                    node_embed, rot, trans, node_mask)
+                    node_embed, rot, trans, node_mask, gen_mask)
                 
 
                 if b < num_blocks-1:
@@ -187,7 +187,7 @@ class VQPAEBlock(nn.Module):
         curr_rigids = du.create_rigid(rotmats, trans)
         
         node_embed, rigids = self._process_trunk(
-            'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask)
+            'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=batch['generate_mask'])
         
         # rotmats = rigids.get_rots().get_rot_mats()
         # trans = rigids.get_trans()
@@ -224,7 +224,7 @@ class VQPAEBlock(nn.Module):
         
         
         node_embed, curr_rigids = self._process_trunk(
-            'decoder', node_embed, edge_embed, curr_rigids, node_mask, edge_mask)
+            'decoder', node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask=generate_mask)
         
         # 输出预测
         pred_seqs = self.seq_net(node_embed)
@@ -283,6 +283,7 @@ class VQPAEBlock(nn.Module):
             node_embed, 
             batch['rotmats'], batch['trans'], 
             node_mask,
+            batch['generate_mask'],
             )
         return node_embed
         
@@ -495,14 +496,14 @@ class FeaFusionLayer(nn.Module):
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
         
-    def forward(self, node_emb, rot, trans, node_mask):
+    def forward(self, node_emb, rot, trans, node_mask, gen_mask):
         # rot = rigid.get_rots().get_rot_mats()
         rot = so3_utils.rotmat_to_rotvec(rot)
         rot = self.rot_net(rot)
         # trans = rigid.get_trans() # B, L, 3
         # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
         # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
-        trans = (trans * node_mask[..., None]) / node_mask[..., None].sum(dim=1, keepdim=True)
+        trans = (trans * gen_mask[..., None]) / gen_mask[..., None].sum(dim=1, keepdim=True)
         node_emb_ = self.fusion(torch.cat(
             [node_emb, rot, self.dist_net(trans/100.)], dim=-1
         ))
