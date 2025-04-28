@@ -216,7 +216,7 @@ if __name__ == '__main__':
                 plt.title(f'Codebook Usage Distribution (Iter {it})')
                 plt.xlabel('Codebook Index')
                 plt.ylabel('Usage Count')
-
+                os.makedirs(os.path.join(log_dir, "codebook_cnt"), exist_ok=True)
                 plt.savefig(os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'), bbox_inches = 'tight')
                 print("Save codebook count to %s" % os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
                 plt.close()
