@@ -185,31 +185,6 @@ if __name__ == '__main__':
                 coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
                 plot_codebook_dist(coodbook_cnt, log_dir, it)
                 model.vqvae.quantizer.reset_counts()
-                # import seaborn as sns
-                # import matplotlib.pyplot as plt
-                # # sns.set_theme(style="whitegrid")
-                # plt.plot(coodbook_cnt, alpha=0.7, label='Code Usage')
-                # stats_dict = calc_statistics(coodbook_cnt)
-                # # 添加统计线 [4,6,8](@ref)
-                # # print(stats_dict)
-                # plt.axhline(stats_dict['median'], color='purple', linestyle='--', 
-                #             linewidth=2, label=f'Median ({stats_dict["median"]:.1f})')
-                # plt.axhline(stats_dict['q25'], color='green', linestyle=':', 
-                #             linewidth=1.5, label=f'25th Percentile ({stats_dict["q25"]:.1f})')
-                # plt.axhline(stats_dict['q75'], color='orange', linestyle=':', 
-                #             linewidth=1.5, label=f'75th Percentile ({stats_dict["q75"]:.1f})')
-                # plt.axhline(stats_dict['mean'], color='red', linestyle=':',
-                #             linewidth=1.5, label=f'0th Percentile ({stats_dict["mean"]:.1f})')
-                # plt.axhline(stats_dict['madian_val'], color='blue', linestyle=':',
-                #             linewidth=1.5, label=f'Median ({stats_dict["median_val"]:.1f})'))
-                # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left') 
-                # plt.title(f'Codebook Usage Distribution (Iter {it})| Entropy({stats_dict["entropy"]:.2f})| Usage Rate({stats_dict["usage_rate"]:.2f})')
-                # plt.xlabel('Codebook Index')
-                # plt.ylabel('Usage Count')
-                # os.makedirs(os.path.join(log_dir, "codebook_cnt"), exist_ok=True)
-                # plt.savefig(os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'), bbox_inches = 'tight')
-                # print("Save codebook count to %s" % os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
-                # plt.close()
             
 
     def validate(it, mode):
