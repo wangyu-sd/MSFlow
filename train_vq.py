@@ -126,7 +126,7 @@ if __name__ == '__main__':
         model.load_state_dict(ckpt['model'], strict=False)
         logger.info('Done!')
         
-        
+    print("Current Loger Dir: %s" % log_dir)
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
@@ -185,7 +185,8 @@ if __name__ == '__main__':
                 plt.title('Codebook Count')
                 plt.xlabel('Codebook Index')
                 plt.ylabel('Count')
-                plt.savefig(os.path.join(ckpt_dir, f'codebook_cnt_{it}.png'))
+                os.makedirs(os.path.join(ckpt_dir, "codebook_cnt"), exist_ok=True)
+                plt.savefig(os.path.join(ckpt_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
             
 
     def validate(it, mode):
@@ -284,4 +285,6 @@ if __name__ == '__main__':
             # 'avg_val_loss': avg_val_loss,
         }, ckpt_path)
         logger.info('Terminating...')
+        print('Current iteration: %d' % it)
+        print('Last checkpoint saved to %s' % ckpt_path)
         
