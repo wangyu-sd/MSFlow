@@ -113,7 +113,7 @@ class VQPAE(nn.Module):
         return pos,center
     
     
-    def fape_loss(pred_coords, true_coords, mask):
+    def fape_loss(self, pred_coords, true_coords, mask):
         # pred_coords: [B, L, 3]
         # true_coords: [B, L, 3]
         # mask: [B, L] (有效残基掩码)
