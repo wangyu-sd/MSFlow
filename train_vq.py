@@ -181,12 +181,14 @@ if __name__ == '__main__':
                 import seaborn as sns
                 import matplotlib.pyplot as plt
                 # sns.set_theme(style="whitegrid")
-                sns.histplot(coodbook_cnt, kde=False, bins=model.vqvae.quantizer.codebook_size)
+                plt.plot(coodbook_cnt)
+                plt.xticks(range(len(coodbook_cnt)))
                 plt.title('Codebook Count')
                 plt.xlabel('Codebook Index')
                 plt.ylabel('Count')
                 os.makedirs(os.path.join(log_dir, "codebook_cnt"), exist_ok=True)
                 plt.savefig(os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'), bbox_inches = 'tight')
+                print("Save codebook count to %s" % os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
             
 
     def validate(it, mode):
