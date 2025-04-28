@@ -60,7 +60,9 @@ train:
     q_latent_loss: 0.5
     dist_loss: 0.25
     fape_loss: 0.05
-    clash_loss: 0.10
+    clash_loss: 0.10,
+    bb_angle_loss: 0.1,
+    bb_torsion_loss: 0.1,
   max_iters: 400000000
   val_freq: 5000
   batch_size: 10

@@ -4,7 +4,7 @@ import os
 import numpy as np
 from scipy import stats
 
-def calc_statistics(arr, threshold=0.01):
+def calc_statistics(arr, threshold=0.1):
     # 中位数和分位数（兼容空数组）
     median_val = np.median(arr) if len(arr) > 0 else 0
     q0, q25, q50, q75, q100 = np.percentile(arr, [0, 25, 50, 75, 100]) if len(arr) > 0 else (0,0,0)

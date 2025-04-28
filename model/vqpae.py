@@ -1,4 +1,5 @@
 # import numpy as np
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,6 +22,7 @@ from model.vqpae_layer import VQPAEBlock
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
 from model.modules.common.geometry import construct_3d_basis
 from torch.nn.utils.rnn import pad_sequence
+from model.models_con import torus
 # from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
 # from model.utils.misc import seed_all
 # from model.utils.train import sum_weighted_losses
@@ -57,6 +59,7 @@ class VQPAE(nn.Module):
         self.node_embedder = NodeEmbedder(cfg.encoder.node_embed_size,max_num_heavyatoms)
         self.edge_embedder = EdgeEmbedder(cfg.encoder.edge_embed_size,max_num_heavyatoms)
         self.vqvae: VQPAEBlock = VQPAEBlock(cfg.encoder.ipa)
+        self.strc_loss_fn = ProteinStructureLoss()
         # self.node_proj = nn.Linear(cfg.encoder.node_embed_size, cfg.encoder.ipa.c_s)
         # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
                 
@@ -162,42 +165,9 @@ class VQPAE(nn.Module):
         trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
         
-        gen_mask = gen_mask.bool()
-        trans_pred_list = [pred_trans_c[i][gen_mask[i]] for i in range(gen_mask.size(0))]
-        trans_true_list = [trans[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         
-        trans_pred_gen = pad_sequence(trans_pred_list, batch_first=True, padding_value=0.0)
-        trans_true_gen = pad_sequence(trans_true_list, batch_first=True, padding_value=0.0)
-        gen_mask_sm = pad_sequence([gen_mask[i][gen_mask[i]] for i in range(gen_mask.size(0))], batch_first=True, padding_value=0.0)
+        strc_loss = self.strc_loss_fn(pred_trans_c, trans_loss, gen_mask)
         
-        dist_gen_pred = torch.cdist(trans_pred_gen, trans_pred_gen)
-        dist_true_pred = torch.cdist(trans_true_gen, trans_true_gen)
-        
-        dist_mask = gen_mask_sm[:, :, None] * gen_mask_sm[:, None, :] # (B,L,L)
-        dist_loss = (dist_gen_pred - dist_true_pred).pow(2) * dist_mask
-        dist_loss = torch.sum(dist_loss, dim=(-1,-2)) / (torch.sum(dist_mask,dim=(-1,-2)) + 1e-8) # (B,)
-        dist_loss = torch.mean(dist_loss)
-        
-        mask = (dist_gen_pred < 3.8) & (dist_gen_pred > 2.0)  # 排除相邻残基
-        clash = torch.where(mask, (3.8 - dist_gen_pred).pow(2), 0.0)
-        clash_loss = torch.sum(clash, dim=(-1,-2)) / (torch.sum(dist_mask,dim=(-1,-2)) + 1e-8) # (B,)
-        clash_loss = torch.mean(clash_loss)
-        if trans_loss < 1:
-            fape_loss = self.fape_loss(trans_pred_gen, trans_true_gen, gen_mask_sm)
-        else:
-            fape_loss = 0.
-        # dist_loss = 0.
-        # clash_loss = 0.
-        # for i in range(gen_mask.size(0)):
-        #     dist_i = torch.cdist(trans_pred_list[i], trans_pred_list[i])
-        #     dist_j = torch.cdist(trans_true_list[i], trans_true_list[i])
-        #     dist_loss += torch.mean((dist_i - dist_j).pow(2))
-            
-        #     mask = (dist_j < 3.8) & (dist_j > 2.0)  # 排除相邻残基
-        #     clash = torch.where(mask, (3.8 - dist_i).pow(2), 0.0)
-        #     clash_loss += torch.mean(clash)
-        # dist_loss = dist_loss / gen_mask.size(0)
-        # fape_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotmats) 
         rot_loss = torch.sum(((rotamats_vec - pred_rotmats_vec))**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
@@ -225,7 +195,7 @@ class VQPAE(nn.Module):
         angle_mask_loss = torsions_mask.to(pred_rotmats.device)
         angle_mask_loss = angle_mask_loss[pred_seqs.reshape(-1)].reshape(num_batch,num_res,-1) # (B,L,5)
         angle_mask_loss = torch.cat([angle_mask_loss,angle_mask_loss],dim=-1) # (B,L,10)
-        angle_mask_loss = torch.logical_and(gen_mask[...,None].bool(),angle_mask_loss)
+        angle_mask_loss = torch.logical_and(gen_mask[...,None].bool(), angle_mask_loss)
         
         # angle aux loss
         gt_angle_vec = torch.cat([torch.sin(angles),torch.cos(angles)],dim=-1)
@@ -241,9 +211,10 @@ class VQPAE(nn.Module):
             'bb_atom_loss': bb_atom_loss * weigeht,
             'seqs_loss': seqs_loss * weigeht,
             'angle_loss': angle_loss * weigeht,
-            'dist_loss': dist_loss * weigeht,
-            'fape_loss': fape_loss * weigeht,
-            "clash_loss": clash_loss * weigeht,
+            'dist_loss': strc_loss['dist_loss'] * weigeht,
+            "clash_loss": strc_loss['clash_loss'] * weigeht,
+            "bb_angle_loss": strc_loss['bb_angle_loss'] * weigeht,
+            "bb_torsion_loss": strc_loss['bb_torsion_loss'] * weigeht,
         }
         
         for key in res.keys():
@@ -288,6 +259,219 @@ class VQPAE(nn.Module):
         
 
         return all_loss, poc_loss, pep_loss
+
+def torsion_entropy(sin_cos_pred):
+    """
+    sin_cos_pred: (B, L, 4, 2) 预测的sin/cos值
+    """
+    # 计算角度分布熵
+    angles = torch.atan2(sin_cos_pred[...,0], sin_cos_pred[...,1])  # (B,L,4)
+    hist = torch.histc(angles, bins=36, min=-math.pi, max=math.pi)  # (B,36)
+    prob = hist / hist.sum(dim=1, keepdim=True)
+    entropy = -torch.sum(prob * torch.log(prob + 1e-6), dim=1)  # (B,)
+    
+    return entropy
+
+    
+
+class ProteinStructureLoss(nn.Module):
+    def __init__(self, 
+                 pos_weight: float = 1.0,
+                 angle_weight: float = 0.5,
+                 torsion_weight: float = 0.3,
+                 fape_weight: float = 0.2):
+        super().__init__()
+        self.pos_weight = pos_weight
+        self.angle_weight = angle_weight 
+        self.torsion_weight = torsion_weight
+        self.fape_weight = fape_weight
+        
+    def masked_mean(self, tensor, mask):
+        """
+        掩码加权平均计算
+        tensor: [B, L, ...]
+        mask:   [B, L]
+        """
+        valid = mask.sum(dim=-1).clamp(min=1e-6)
+        loss = (tensor * mask.unsqueeze(-1)).sum(dim=[1, 2]) / valid
+        return loss.mean()
+
+    def position_loss(self, pred, target, mask):
+        """坐标位置损失 (FAPE Loss变体)"""
+        delta = pred - target
+        dist = torch.norm(delta, dim=-1)  # [B, L]
+        return self.masked_mean(dist, mask)
+    
+    def angle_loss(self, pred, target, mask):
+        """Cα间夹角损失 (连续三个残基)"""
+        # 计算预测角度
+        pred_angles = self.compute_ca_angles(pred)  # [B, L]
+        # 计算真实角度
+        true_angles = self.compute_ca_angles(target)
+        # 周期损失计算
+        sin_loss = torch.sin(pred_angles - true_angles).pow(2)
+        cos_loss = torch.cos(pred_angles - true_angles).pow(2)
+        return self.masked_mean(sin_loss + cos_loss, mask[:, 1:-1])
+    
+    def torsion_loss(self, pred, target, mask):
+        """扭转角损失 (四个连续残基)"""
+        # 预测/真实扭转角计算
+        pred_torsion = self.compute_dihedrals(pred)  # [B, L-3, 2]
+        true_torsion = self.compute_dihedrals(target)
+        # 周期损失计算
+        sin_loss = torch.sin(pred_torsion - true_torsion).pow(2)
+        cos_loss = torch.cos(pred_torsion - true_torsion).pow(2)
+        return self.masked_mean(sin_loss + cos_loss, mask[:, 2:-1])
+    
+    def compute_ca_angles(self, coords):
+        """计算三个连续Cα的夹角"""
+        # coords: [B, L, 3]
+        v1 = coords[:, :-2] - coords[:, 1:-1]  # BA向量
+        v2 = coords[:, 2:] - coords[:, 1:-1]   # BC向量
+        cos_theta = torch.sum(v1 * v2, dim=-1) / (
+            torch.norm(v1, dim=-1) * torch.norm(v2, dim=-1) + 1e-6
+        )
+        return torch.acos(torch.clamp(cos_theta, -1.0, 1.0))  # [B, L-2]
+    
+    def compute_dihedrals(self, coords):
+        """计算四个连续Cα的二面角 (phi/psi)"""
+        # 参考AlphaFold几何编码[8](@ref)
+        p0, p1, p2, p3 = coords[:, :-3], coords[:, 1:-2], coords[:, 2:-1], coords[:, 3:]
+        
+        v1 = p1 - p0
+        v2 = p2 - p1
+        v3 = p3 - p2
+        
+        # 计算法向量
+        n1 = torch.cross(v1, v2)  # 平面p0-p1-p2的法向量
+        n2 = torch.cross(v2, v3)  # 平面p1-p2-p3的法向量
+        
+        # 计算夹角
+        cos_phi = torch.sum(n1 * n2, dim=-1) / (
+            torch.norm(n1, dim=-1) * torch.norm(n2, dim=-1) + 1e-6
+        )
+        phi = torch.acos(torch.clamp(cos_phi, -1.0, 1.0))
+        
+        # 判断方向
+        sign = torch.sign(torch.sum(torch.cross(n1, n2) * v2, dim=-1))
+        return sign * phi  # [B, L-3]
+    
+    def dist_and_clash_loss(self, pred, target, mask):
+        dist_1 = torch.cdist(pred, pred)
+        dist_2 = torch.cdist(target, target)
+        dist_mask = mask[:, :, None] * mask[:, None, :]  # [B, L, L]
+        dist_loss = (dist_1 - dist_2).pow(2)
+        dist_loss = torch.sum(dist_loss * dist_mask, dim=(-1, -2)) / (torch.sum(dist_mask, dim=(-1, -2)) + 1e-8)  # [B]
+        
+        # clash loss
+        mask_clash = (dist_1 < 3.8) & (dist_1 > 2.0)
+        clash_loss = torch.where(mask_clash, (3.8 - dist_1).pow(2), 0.0)
+        clash_loss = torch.sum(clash_loss * dist_mask, dim=(-1, -2)) / (torch.sum(dist_mask, dim=(-1, -2)) + 1e-8)
+        
+        return torch.mean(dist_loss), torch.mean(clash_loss)
+        
+    
+    def extract_fea_from_gen(self, fea, gen_mask):
+        gen_mask = gen_mask.bool()
+        return pad_sequence(
+            [fea[i][gen_mask[i]] for i in range(gen_mask.size(0))], 
+            batch_first=True, 
+            padding_value=0.0
+            )
+        
+    def fape_loss(self, pos_pred, pos_target, mask):
+        """
+        FAPE损失函数实现
+        参数:
+            pos_pred:   (B, N, 3) 模型预测的原子坐标
+            pos_target: (B, N, 3) 真实原子坐标
+            mask:       (B, N)   有效坐标标记(1有效，0无效)
+        返回:
+            loss: 标量损失值
+        """
+        # 步骤1：Kabsch对齐预测坐标
+        aligned_pred = kabsch_transform(pos_pred, pos_target, mask)  # (B,N,3)
+        
+        # 步骤2：计算点对点L2距离
+        squared_diff = torch.sum((aligned_pred - pos_target), dim=-1)  # (B,N)
+        l2_dist = torch.sqrt(squared_diff + 1e-6)  # 数值稳定
+        
+        # 步骤3：应用mask过滤无效位置[6,8](@ref)
+        valid_loss = l2_dist * mask  # (B,N)
+        
+        # 步骤4：计算加权平均损失
+        num_valid = torch.sum(mask, dim=(0,1)) + 1e-6
+        loss = torch.sum(valid_loss) / num_valid
+        
+        return loss
+        
+    
+    def forward(self, pred, target, gen_mask):
+        """
+        Args:
+            pred:  预测坐标 [B, L, 3]
+            target:真实坐标 [B, L, 3] 
+            mask:  有效残基掩码 [B, L]
+        Returns:
+            total_loss: 综合损失值
+        """
+        # 主损失项
+        pred = self.extract_fea_from_gen(pred, gen_mask)
+        target = self.extract_fea_from_gen(target, gen_mask)
+        mask = self.extract_fea_from_gen(mask, gen_mask)
+        
+        
+        pos_loss = self.position_loss(pred, target, mask)
+        angle_loss = self.angle_loss(pred, target, mask)
+        torsion_loss = self.torsion_loss(pred, target, mask)
+        dist_loss, clash_loss = self.dist_and_clash_loss(pred, target, mask)
+        # fape_loss = self.fape_loss(pred, target, mask)
+        
+        # 动态权重设置(参考Distance-AF[3](@ref))
+        
+        return {
+            'pos_loss': pos_loss,
+            'bb_angle_loss': angle_loss,
+            'bb_torsion_loss': torsion_loss,
+            'dist_loss': dist_loss,
+            'clash_loss': clash_loss,
+            # 'fape_loss': fape_loss,
+        }
+        
+
+def kabsch_transform(pred, target, mask):
+    """
+    可微分Kabsch对齐实现[8](@ref)
+    输入: 
+        pred:   (B, N, 3) 预测坐标 
+        target: (B, N, 3) 真实坐标
+        mask:   (B, N)   有效点标记
+    返回: 对齐后的预测坐标 (B, N, 3)
+    """
+    # 用mask过滤无效点
+    masked_pred = pred * mask.unsqueeze(-1)  # (B,N,3)
+    masked_target = target * mask.unsqueeze(-1)  # (B,N,3)
+    
+    # 计算质心
+    center_pred = masked_pred.sum(dim=1) / (mask.sum(dim=1, keepdim=True) + 1e-6)  # (B,3)
+    center_target = masked_target.sum(dim=1) / (mask.sum(dim=1, keepdim=True) + 1e-6)
+    
+    # 去中心化
+    pred_centered = masked_pred - center_pred.unsqueeze(1)  # (B,N,3)
+    target_centered = masked_target - center_target.unsqueeze(1)
+    
+    # 协方差矩阵
+    H = torch.einsum('bni,bnj->bij', pred_centered, target_centered)  # (B,3,3)
+    
+    # SVD分解求旋转矩阵
+    U, S, Vh = torch.linalg.svd(H)
+    det = torch.det(torch.bmm(U, Vh)).sign().unsqueeze(-1).unsqueeze(-1)
+    R = torch.bmm(U * det, Vh)  # (B,3,3)
+    
+    # 应用旋转平移
+    aligned_pred = torch.einsum('bij,bnj->bni', R, pred_centered) + center_target.unsqueeze(1)
+    return aligned_pred
+
 
 # if __name__ == '__main__':
 #     prefix_dir = './pepflowww'
