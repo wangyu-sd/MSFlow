@@ -131,15 +131,11 @@ class VQPAE(nn.Module):
         
         # 计算变换后的坐标差异
         diff = torch.bmm(pred_coords, pred_frames) - torch.bmm(true_coords, true_frames)
-        loss = (diff.pow(2)).sum(-1) * mask.unsqueeze(-1)
-        loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)  # [B, L, 3]
-        return loss.mean()
+        loss = diff.pow(2) * mask[..., None]  # [B, L, 3]
+        loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)[..., None]  # [B, L, 3]
+        return loss.sum()
     
     
-
-
-
-      
     def get_loss(self, res, fea_dict, mode, weigeht=1.):
         pred_trans, pred_rotmats, pred_angles, pred_seqs_prob = \
             res['pred_trans'], res['pred_rotmats'], res['pred_angles'], res['pred_seqs']
