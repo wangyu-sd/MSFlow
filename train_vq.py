@@ -182,7 +182,7 @@ if __name__ == '__main__':
                 import matplotlib.pyplot as plt
                 # sns.set_theme(style="whitegrid")
                 plt.plot(coodbook_cnt)
-                plt.xticks(range(len(coodbook_cnt)))
+                # plt.xticks(range(len(coodbook_cnt)))
                 plt.title('Codebook Count')
                 plt.xlabel('Codebook Index')
                 plt.ylabel('Count')
