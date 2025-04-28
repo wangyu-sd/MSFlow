@@ -125,10 +125,10 @@ class VQPAE(nn.Module):
             v1 = coords[..., 1, :] - coords[..., 0, :]
             v2 = coords[..., 2, :] - coords[..., 1, :]
             
-            v1 = v1 / torch.norm(v1, dim=-1, keepdim=True)  # [B, L, 3]
-            v2 = v2 / torch.norm(v2, dim=-1, keepdim=True)  # [B, L, 3]
+            # v1 = v1 / torch.norm(v1, dim=-1, keepdim=True)  # [B, L, 3]
+            # v2 = v2 / torch.norm(v2, dim=-1, keepdim=True)  # [B, L, 3]
             normal = torch.cross(v1, v2, dim=-1)
-            normal = normal / torch.norm(normal, dim=-1, keepdim=True)  # [B, L, 3]
+            # normal = normal / torch.norm(normal, dim=-1, keepdim=True)  # [B, L, 3]
             return torch.stack([v1, v2, normal], dim=-1)  # [B, 3, 3]
         
         pred_frames = local_transform(pred_coords)
@@ -163,6 +163,7 @@ class VQPAE(nn.Module):
         trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
         
+        gen_mask = gen_mask.bool()
         trans_pred_list = [pred_trans_c[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         trans_true_list = [trans[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         
@@ -195,7 +196,6 @@ class VQPAE(nn.Module):
         #     clash_loss += torch.mean(clash)
         # dist_loss = dist_loss / gen_mask.size(0)
         # fape_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
-        
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotmats) 
         rot_loss = torch.sum(((rotamats_vec - pred_rotmats_vec))**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
