@@ -130,7 +130,7 @@ class VQPAE(nn.Module):
         true_frames = local_transform(true_coords)
         
         # 计算变换后的坐标差异
-        diff = torch.bmm(pred_coords, pred_frames) - (true_coords.unsqueeze(-2) @ true_frames)
+        diff = torch.bmm(pred_coords, pred_frames) - torch.bmm(true_coords, true_frames)
         loss = (diff.pow(2)).sum(-1) * mask.unsqueeze(-1)
         loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)  # [B, L, 3]
         return loss.mean()
