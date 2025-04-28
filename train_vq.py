@@ -180,13 +180,13 @@ if __name__ == '__main__':
                 coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
                 import seaborn as sns
                 import matplotlib.pyplot as plt
-                sns.set_theme(style="whitegrid")
-                sns.displot(coodbook_cnt)
+                # sns.set_theme(style="whitegrid")
+                sns.histplot(coodbook_cnt, kde=False, bins=model.vqvae.quantizer.codebook_size)
                 plt.title('Codebook Count')
                 plt.xlabel('Codebook Index')
                 plt.ylabel('Count')
-                os.makedirs(os.path.join(ckpt_dir, "codebook_cnt"), exist_ok=True)
-                plt.savefig(os.path.join(ckpt_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
+                os.makedirs(os.path.join(log_dir, "codebook_cnt"), exist_ok=True)
+                plt.savefig(os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'), bbox_inches = 'tight')
             
 
     def validate(it, mode):
