@@ -179,7 +179,7 @@ if __name__ == '__main__':
             'time_backward': (time_backward_end - time_forward_end) / 1000,
         })
         if not args.debug:
-            to_log = it % (len_train_dataset // config.train.batch_size) == 0
+            to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
             log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger, to_log=to_log)
             if to_log:
                 coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
