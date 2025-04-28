@@ -42,6 +42,10 @@ class VectorQuantizer(nn.Module):
         self.register_buffer("collected_samples", collected_samples)
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
     
+    
+    def reset_counts(self):
+        self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
+        
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
         

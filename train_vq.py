@@ -24,26 +24,8 @@ from model.models_con.pep_dataloader import PepDataset
 # from models_con.flow_model import FlowModel
 
 from model.vqpae import VQPAE
-import numpy as np
-from scipy import stats
+from model.plot_results import plot_codebook_dist
 
-
-def calc_statistics(arr):
-    # 中位数和分位数（兼容空数组）
-    median_val = np.median(arr) if len(arr) > 0 else 0
-    q25, q50, q75 = np.percentile(arr, [25, 50, 75]) if len(arr) > 0 else (0,0,0)
-    
-    # 众数计算（处理多众数情况）[1,3](@ref)
-    mode_res = stats.mode(arr, keepdims=True) if len(arr) > 0 else (np.array([0]), np.array([0]))
-    modes = mode_res.mode
-    
-    return {
-        'median': median_val,
-        'q25': q25,
-        'q50': q50,
-        'q75': q75,
-        'modes': modes
-    }
 
 
 if __name__ == '__main__':
@@ -114,6 +96,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
     train_iterator = inf_iterator(train_loader)
     val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
+    len_train_dataset = len(train_dataset)
     logger.info('Train %d | Val %d' % (len(train_dataset), len(val_dataset)))
 
     # Model
@@ -196,30 +179,37 @@ if __name__ == '__main__':
             'time_backward': (time_backward_end - time_forward_end) / 1000,
         })
         if not args.debug:
-            log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger)
-            if it % 100 == 1:
+            to_log = it % (len(len_train_dataset) // config.train.batch_size) == 0
+            log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger, to_log=to_log)
+            if to_log:
                 coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
-                import seaborn as sns
-                import matplotlib.pyplot as plt
-                # sns.set_theme(style="whitegrid")
-                plt.plot(coodbook_cnt, alpha=0.7, label='Code Usage')
-                stats_dict = calc_statistics(coodbook_cnt)
-                # 添加统计线 [4,6,8](@ref)
-
-                plt.axhline(stats_dict['median'], color='purple', linestyle='--', 
-                            linewidth=2, label=f'Median ({stats_dict["median"]:.1f})')
-                plt.axhline(stats_dict['q25'], color='green', linestyle=':', 
-                            linewidth=1.5, label=f'25th Percentile ({stats_dict["q25"]:.1f})')
-                plt.axhline(stats_dict['q75'], color='orange', linestyle=':', 
-                            linewidth=1.5, label=f'75th Percentile ({stats_dict["q75"]:.1f})')
-                plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left') 
-                plt.title(f'Codebook Usage Distribution (Iter {it})')
-                plt.xlabel('Codebook Index')
-                plt.ylabel('Usage Count')
-                os.makedirs(os.path.join(log_dir, "codebook_cnt"), exist_ok=True)
-                plt.savefig(os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'), bbox_inches = 'tight')
-                print("Save codebook count to %s" % os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
-                plt.close()
+                plot_codebook_dist(coodbook_cnt, log_dir, it)
+                model.vqvae.quantizer.reset_counts()
+                # import seaborn as sns
+                # import matplotlib.pyplot as plt
+                # # sns.set_theme(style="whitegrid")
+                # plt.plot(coodbook_cnt, alpha=0.7, label='Code Usage')
+                # stats_dict = calc_statistics(coodbook_cnt)
+                # # 添加统计线 [4,6,8](@ref)
+                # # print(stats_dict)
+                # plt.axhline(stats_dict['median'], color='purple', linestyle='--', 
+                #             linewidth=2, label=f'Median ({stats_dict["median"]:.1f})')
+                # plt.axhline(stats_dict['q25'], color='green', linestyle=':', 
+                #             linewidth=1.5, label=f'25th Percentile ({stats_dict["q25"]:.1f})')
+                # plt.axhline(stats_dict['q75'], color='orange', linestyle=':', 
+                #             linewidth=1.5, label=f'75th Percentile ({stats_dict["q75"]:.1f})')
+                # plt.axhline(stats_dict['mean'], color='red', linestyle=':',
+                #             linewidth=1.5, label=f'0th Percentile ({stats_dict["mean"]:.1f})')
+                # plt.axhline(stats_dict['madian_val'], color='blue', linestyle=':',
+                #             linewidth=1.5, label=f'Median ({stats_dict["median_val"]:.1f})'))
+                # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left') 
+                # plt.title(f'Codebook Usage Distribution (Iter {it})| Entropy({stats_dict["entropy"]:.2f})| Usage Rate({stats_dict["usage_rate"]:.2f})')
+                # plt.xlabel('Codebook Index')
+                # plt.ylabel('Usage Count')
+                # os.makedirs(os.path.join(log_dir, "codebook_cnt"), exist_ok=True)
+                # plt.savefig(os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'), bbox_inches = 'tight')
+                # print("Save codebook count to %s" % os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
+                # plt.close()
             
 
     def validate(it, mode):
@@ -319,5 +309,6 @@ if __name__ == '__main__':
         }, ckpt_path)
         logger.info('Terminating...')
         print('Current iteration: %d' % it)
+        print("Log dir:", log_dir)
         print('Last checkpoint saved to %s' % ckpt_path)
         

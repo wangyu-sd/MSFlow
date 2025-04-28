@@ -60,9 +60,9 @@ def get_warmup_sched(cfg, optimizer):
     return warmup_sched
 
 
-def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, it, tag, logger=BlackHole(), writer=BlackHole(), counter=None):
+def log_losses(loss, loss_dict_all, loss_dict_poc, loss_dict_pep, scalar_dict, it, tag, logger=BlackHole(), writer=BlackHole(), counter=None, to_log=False):
     
-    if it % 20 == 0:
+    if to_log:
         logstr = '[%s] Iter %05d' % (tag, it)
         logstr += ' | loss %.4f' % loss.item()
         
