@@ -55,8 +55,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-bfae6e9]_2025_04_28__03_26_39/checkpoints/50002_coodbook.pt")
-    # parser.add_argument('--from_pretrain', type=str, default=None)
+    # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-bfae6e9]_2025_04_28__03_26_39/checkpoints/50002_coodbook.pt")
+    parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
     args = parser.parse_args()
@@ -197,7 +197,7 @@ if __name__ == '__main__':
         })
         if not args.debug:
             log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger)
-            if it % 100 == 0:
+            if it % 100 == 1:
                 coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
                 import seaborn as sns
                 import matplotlib.pyplot as plt

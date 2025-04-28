@@ -4,6 +4,24 @@ from torch.nn import functional as F
 from scipy.cluster.vq import kmeans2
 from typing import List
 
+class ReparameterizedCodebook(nn.Module):
+    def __init__(self, codebook_size=128, embedding_dim=512):
+        super().__init__()
+        # 基向量矩阵 (K x base_dim)
+        self.base = nn.Parameter(torch.randn(codebook_size, embedding_dim))  
+        # 可学习投影矩阵
+        self.proj = nn.Linear(embedding_dim, embedding_dim)  
+        
+        self.reset_parameters()
+        
+    def reset_parameters(self):
+        # 重置参数
+        torch.nn.init.orthogonal_(self.base)
+        torch.nn.init.xavier_uniform_(self.proj.weight)
+        self.proj.bias.data.zero_()
+        
+    def forward(self):
+        return self.proj(self.base)  # 动态生成codebook向量
 class VectorQuantizer(nn.Module):
     def __init__(self, codebook_size, embedding_dim, commitment_cost, init_steps, collect_desired_size, scales):
         super().__init__()
@@ -12,9 +30,10 @@ class VectorQuantizer(nn.Module):
         self.embedding_dim = embedding_dim
         self.commitment_cost = commitment_cost
         self.scales = [2**i for i in range(scales+1)]
-
-        self.embedding = nn.Embedding(codebook_size, embedding_dim)
-        self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
+        self.coodbook_generator = ReparameterizedCodebook(codebook_size, embedding_dim)
+        self.register_buffer("embedding", self.coodbook_generator())
+        
+        # self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
 
         self.init_steps = init_steps
         self.collect_phase = init_steps > 0
@@ -22,6 +41,9 @@ class VectorQuantizer(nn.Module):
         self.collect_desired_size = collect_desired_size
         self.register_buffer("collected_samples", collected_samples)
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
+    
+    def update_embedding(self):
+        self.embedding = self.coodbook_generator()
         
     def forward(self, f_BNC, col_samples=False, vae_stage=False):
         f_BCN = f_BNC.permute(0, 2, 1)
@@ -30,6 +52,9 @@ class VectorQuantizer(nn.Module):
         f_no_grad = f_BCN.detach()
         f_rest = f_no_grad.clone()
         f_hat  = torch.zeros_like(f_rest)
+        
+        if not vae_stage:
+            self.update_embedding()
 
         with torch.amp.autocast(enabled=False, device_type=f_BCN.device.type):
             mean_q_latent_loss: torch.Tensor = 0.0
