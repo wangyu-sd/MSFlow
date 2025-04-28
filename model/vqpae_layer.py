@@ -298,7 +298,7 @@ class VQPAEBlock(nn.Module):
         node_embed, node_mask, edge_mask, curr_rigids, _ = self.encoder_step(batch, mode)
         quantized = self.before_quntized(node_embed, gen_mask=batch['generate_mask']) # TODO Add more choices for gen_mask
         
-        quantized, commitment_loss, q_latent_loss = self.quantizer(quantized)
+        quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized)
         
         quantized = self.after_quntized(quantized, gen_mask=batch['generate_mask'])
         
@@ -310,6 +310,7 @@ class VQPAEBlock(nn.Module):
         )
         res['commitment_loss'] = commitment_loss
         res['q_latent_loss'] = q_latent_loss
+        res['div_loss'] = div_loss
 
         return res
 
@@ -329,7 +330,7 @@ class VQPAEBlock(nn.Module):
         elif self.quantizer.collect_phase:
             self.quantizer.collect_samples(interpolated_nodes.detach())
         
-        node, _, _ = self.quantizer(interpolated_nodes, vae_stage=True)
+        node, _, _, _ = self.quantizer(interpolated_nodes, vae_stage=True)
         origin_node = self.after_quntized(node, batch['generate_mask'])
         logvar = self.after_quntized(self.before_quntized(logvar, batch['generate_mask']), batch['generate_mask'])
         mu = origin_node

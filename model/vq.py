@@ -49,6 +49,18 @@ class VectorQuantizer(nn.Module):
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
         
+    def _calculate_diversity_loss(self):
+        """码本向量多样性惩罚项"""
+        # 计算余弦相似度矩阵
+        codebook = self.embedding  # 获取最新码本
+        norm_code = F.normalize(codebook, p=2, dim=1)
+        sim_matrix = torch.mm(norm_code, norm_code.T)  # [K, K]
+        
+        # 排除对角线元素，惩罚相似度高于0.9的向量对
+        mask = (sim_matrix > 0.9) & ~torch.eye(self.codebook_size, device=codebook.device).bool()
+        return torch.sum(sim_matrix[mask]) / self.codebook_size
+
+        
     def forward(self, f_BNC, col_samples=False, vae_stage=False):
         f_BCN = f_BNC.permute(0, 2, 1)
         B, C, N = f_BCN.shape
@@ -94,7 +106,9 @@ class VectorQuantizer(nn.Module):
             f_hat = (f_hat.data - f_no_grad).add_(f_BCN)
             f_hat = f_hat.permute(0, 2, 1) # B, N, C
             # print(self.embedding.weight.data[219, :10])
-            return f_hat, mean_commitment_loss, mean_q_latent_loss
+            divs_loss = self._calculate_diversity_loss()
+            
+            return f_hat, mean_commitment_loss, mean_q_latent_loss, divs_loss
         
     def get_softvq(self, rest_NC, B, pn, C, N):
         d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
