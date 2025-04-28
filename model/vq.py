@@ -49,7 +49,7 @@ class VectorQuantizer(nn.Module):
                     idx_N = torch.argmin(d_no_grad, dim=1)
                     idx_Bn = idx_N.view(B, pn)
                     h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
-                    batch_counts = torch.bincount(idx_Bn.flatten(), minlength=self.codebook.num_embeddings)
+                    batch_counts = torch.bincount(idx_Bn.flatten(), minlength=self.codebook_size)
                     self.batch_counts = self.batch_counts + batch_counts
                     # h_BCn, _ = self.get_softvq(rest_NC, B, pn, C, N)
 
