@@ -171,7 +171,7 @@ class VQPAE(nn.Module):
             clash = torch.where(mask, (3.8 - dist_i).pow(2), 0.0)
             clash_loss += torch.mean(clash)
         dist_loss = dist_loss / gen_mask.size(0)
-        fpae_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
+        fape_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
         
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotmats) 
@@ -217,7 +217,7 @@ class VQPAE(nn.Module):
             'seqs_loss': seqs_loss * weigeht,
             'angle_loss': angle_loss * weigeht,
             'dist_loss': dist_loss * weigeht,
-            'fpae_loss': fpae_loss * weigeht,
+            'fape_loss': fape_loss * weigeht,
             "clash_loss": clash_loss * weigeht,
         }
         
