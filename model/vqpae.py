@@ -166,8 +166,9 @@ class VQPAE(nn.Module):
         trans_pred_list = [pred_trans_c[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         trans_true_list = [trans[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         
-        trans_pred_gen, gen_mask_sm = pad_sequence(trans_pred_list, batch_first=True, padding_value=0.0)
-        trans_true_gen, _ = pad_sequence(trans_true_list, batch_first=True, padding_value=0.0)
+        trans_pred_gen = pad_sequence(trans_pred_list, batch_first=True, padding_value=0.0)
+        trans_true_gen = pad_sequence(trans_true_list, batch_first=True, padding_value=0.0)
+        gen_mask_sm = pad_sequence([gen_mask[i][gen_mask[i]] for i in range(gen_mask.size(0))], batch_first=True, padding_value=0.0)
         
         dist_gen_pred = torch.cdist(trans_pred_gen, trans_pred_gen)
         dist_gen_pred = torch.cdist(trans_true_gen, trans_true_gen)
