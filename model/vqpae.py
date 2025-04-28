@@ -173,7 +173,7 @@ class VQPAE(nn.Module):
         dist_gen_pred = torch.cdist(trans_pred_gen, trans_pred_gen)
         dist_gen_pred = torch.cdist(trans_true_gen, trans_true_gen)
         
-        dist_mask = gen_mask_sm[...,None] * gen_mask_sm[...,None].permute(0,2,1)
+        dist_mask = gen_mask_sm[:, :, None] * gen_mask_sm[:, None, :] # (B,L,L)
         dist_loss = (dist_gen_pred - dist_gen_pred).pow(2) * dist_mask
         dist_loss = torch.sum(dist_loss, dim=(-1,-2)) / (torch.sum(dist_mask,dim=(-1,-2)) + 1e-8) # (B,)
         dist_loss = torch.mean(dist_loss)
