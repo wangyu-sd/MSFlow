@@ -124,13 +124,13 @@ class VQPAE(nn.Module):
             v1 = coords[..., 1, :] - coords[..., 0, :]
             v2 = coords[..., 2, :] - coords[..., 1, :]
             normal = torch.cross(v1, v2, dim=-1)
-            return torch.stack([v1, v2, normal], dim=-1)  # [B, L, 3, 3]
+            return torch.stack([v1, v2, normal], dim=-1)  # [B, 3, 3]
         
         pred_frames = local_transform(pred_coords)
         true_frames = local_transform(true_coords)
         
         # 计算变换后的坐标差异
-        diff = (pred_coords.unsqueeze(-2) @ pred_frames) - (true_coords.unsqueeze(-2) @ true_frames)
+        diff = torch.bmm(pred_coords, pred_frames) - (true_coords.unsqueeze(-2) @ true_frames)
         loss = (diff.pow(2)).sum(-1) * mask.unsqueeze(-1)
         loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)  # [B, L, 3]
         return loss.mean()

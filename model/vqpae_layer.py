@@ -518,7 +518,7 @@ def local_transform(coords):
     v2 = coords[..., 2, :] - coords[..., 1, :]
     normal = torch.cross(v1, v2, dim=-1)
     frame = torch.stack([v1, v2, normal], dim=-1)
-    return coords.unsqueeze(-2) @ frame
+    return torch.bmm(coords, frame)
 
 # class GAEncoder(nn.Module):
 #     def __init__(self, ipa_conf):
