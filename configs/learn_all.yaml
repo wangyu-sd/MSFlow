@@ -58,6 +58,7 @@ train:
     vae_loss: 0.5
     commitment_loss: 0.5
     q_latent_loss: 0.5
+    dist_loss: 0.25
   max_iters: 400000000
   val_freq: 5000
   batch_size: 10

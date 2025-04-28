@@ -476,15 +476,15 @@ class FeaFusionLayer(nn.Module):
         self.rot_net = nn.Sequential(
             nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s // 2)
         )
-        # self.dist_net = nn.Sequential(
-        #     nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
-        #     nn.LayerNorm(self._ipa_conf.c_s),
-        #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-        #     nn.LayerNorm(self._ipa_conf.c_s),
-        #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s // 2),
-        # )
+        self.dist_net = nn.Sequential(
+            nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
+            nn.LayerNorm(self._ipa_conf.c_s),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+            nn.LayerNorm(self._ipa_conf.c_s),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s // 2),
+        )
         self.fusion = nn.Sequential(
             nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s*2),
             nn.LayerNorm(self._ipa_conf.c_s*2),
@@ -502,8 +502,9 @@ class FeaFusionLayer(nn.Module):
         # trans = rigid.get_trans() # B, L, 3
         # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
         # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
+        trans = local_transform(trans)
         node_emb_ = self.fusion(torch.cat(
-            [node_emb, rot], dim=-1
+            [node_emb, rot, self.dist_net(dist/10.)], dim=-1
         ))
         node_emb = node_emb_ + node_emb
         
@@ -511,7 +512,13 @@ class FeaFusionLayer(nn.Module):
         
         return node_emb * node_mask[..., None]
         
-
+def local_transform(coords):
+    # 取前三个残基定义局部坐标系
+    v1 = coords[..., 1, :] - coords[..., 0, :]
+    v2 = coords[..., 2, :] - coords[..., 1, :]
+    normal = torch.cross(v1, v2, dim=-1)
+    frame = torch.stack([v1, v2, normal], dim=-1)
+    return coords.unsqueeze(-2) @ frame
 
 # class GAEncoder(nn.Module):
 #     def __init__(self, ipa_conf):

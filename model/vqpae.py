@@ -111,6 +111,30 @@ class VQPAE(nn.Module):
         pos = pos - center
         pos = pos * res_mask[...,None]
         return pos,center
+    
+    
+    def fape_loss(pred_coords, true_coords, mask):
+        # pred_coords: [B, L, 3]
+        # true_coords: [B, L, 3]
+        # mask: [B, L] (有效残基掩码)
+        
+        # 计算局部坐标系变换
+        def local_transform(coords):
+            # 取前三个残基定义局部坐标系
+            v1 = coords[..., 1, :] - coords[..., 0, :]
+            v2 = coords[..., 2, :] - coords[..., 1, :]
+            normal = torch.cross(v1, v2, dim=-1)
+            return torch.stack([v1, v2, normal], dim=-1)  # [B, L, 3, 3]
+        
+        pred_frames = local_transform(pred_coords)
+        true_frames = local_transform(true_coords)
+        
+        # 计算变换后的坐标差异
+        diff = (pred_coords.unsqueeze(-2) @ pred_frames) - (true_coords.unsqueeze(-2) @ true_frames)
+        loss = (diff.pow(2)).sum(-1) * mask.unsqueeze(-1)
+        loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)  # [B, L, 3]
+        return loss.mean()
+
 
 
       
@@ -135,6 +159,16 @@ class VQPAE(nn.Module):
         pred_trans_c, _ = self.zero_center_part(pred_trans, gen_mask, res_mask)
         trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
+        
+        trans_pred_list = [pred_trans_c[i][gen_mask[i]] for i in range(gen_mask.size(0))]
+        trans_true_list = [trans[i][gen_mask[i]] for i in range(gen_mask.size(0))]
+        dist_loss = 0.
+        for i in range(gen_mask.size(0)):
+            dist_i = torch.cdist(trans_pred_list[i])
+            dist_j = torch.cdist(trans_true_list[i])
+            dist_loss += torch.mean((dist_i - dist_j).pow(2))
+        dist_loss = dist_loss / gen_mask.size(0)
+        fpae_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
         
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotmats) 
@@ -179,6 +213,8 @@ class VQPAE(nn.Module):
             'bb_atom_loss': bb_atom_loss * weigeht,
             'seqs_loss': seqs_loss * weigeht,
             'angle_loss': angle_loss * weigeht,
+            'dist_loss': dist_loss * weigeht,
+            'fpae_loss': fpae_loss * weigeht,
         }
         
         for key in res.keys():
