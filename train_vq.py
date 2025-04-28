@@ -24,6 +24,27 @@ from model.models_con.pep_dataloader import PepDataset
 # from models_con.flow_model import FlowModel
 
 from model.vqpae import VQPAE
+import numpy as np
+from scipy import stats
+
+
+def calc_statistics(arr):
+    # 中位数和分位数（兼容空数组）
+    median_val = np.median(arr) if len(arr) > 0 else 0
+    q25, q50, q75 = np.percentile(arr, [25, 50, 75]) if len(arr) > 0 else (0,0,0)
+    
+    # 众数计算（处理多众数情况）[1,3](@ref)
+    mode_res = stats.mode(arr, keepdims=True) if len(arr) > 0 else (np.array([0]), np.array([0]))
+    modes = mode_res.mode
+    
+    return {
+        'median': median_val,
+        'q25': q25,
+        'q50': q50,
+        'q75': q75,
+        'modes': modes
+    }
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -181,14 +202,24 @@ if __name__ == '__main__':
                 import seaborn as sns
                 import matplotlib.pyplot as plt
                 # sns.set_theme(style="whitegrid")
-                plt.plot(coodbook_cnt)
-                # plt.xticks(range(len(coodbook_cnt)))
-                plt.title('Codebook Count')
+                plt.plot(coodbook_cnt, alpha=0.7, label='Code Usage')
+                stats_dict = calc_statistics(coodbook_cnt)
+                # 添加统计线 [4,6,8](@ref)
+
+                plt.axhline(stats_dict['median'], color='purple', linestyle='--', 
+                            linewidth=2, label=f'Median ({stats_dict["median"]:.1f})')
+                plt.axhline(stats_dict['q25'], color='green', linestyle=':', 
+                            linewidth=1.5, label=f'25th Percentile ({stats_dict["q25"]:.1f})')
+                plt.axhline(stats_dict['q75'], color='orange', linestyle=':', 
+                            linewidth=1.5, label=f'75th Percentile ({stats_dict["q75"]:.1f})')
+                plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left') 
+                plt.title(f'Codebook Usage Distribution (Iter {it})')
                 plt.xlabel('Codebook Index')
-                plt.ylabel('Count')
-                os.makedirs(os.path.join(log_dir, "codebook_cnt"), exist_ok=True)
+                plt.ylabel('Usage Count')
+
                 plt.savefig(os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'), bbox_inches = 'tight')
                 print("Save codebook count to %s" % os.path.join(log_dir, "codebook_cnt", f'codebook_cnt_{it}.png'))
+                plt.close()
             
 
     def validate(it, mode):
