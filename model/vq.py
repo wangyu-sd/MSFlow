@@ -21,6 +21,7 @@ class VectorQuantizer(nn.Module):
         collected_samples = torch.Tensor(0, self.embedding_dim)
         self.collect_desired_size = collect_desired_size
         self.register_buffer("collected_samples", collected_samples)
+        self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
         
     def forward(self, f_BNC, col_samples=False, vae_stage=False):
         f_BCN = f_BNC.permute(0, 2, 1)
@@ -48,7 +49,8 @@ class VectorQuantizer(nn.Module):
                     idx_N = torch.argmin(d_no_grad, dim=1)
                     idx_Bn = idx_N.view(B, pn)
                     h_BCn = F.interpolate(self.embedding(idx_Bn).permute(0, 2, 1), size=(N), mode='linear').contiguous()
-                    
+                    batch_counts = torch.bincount(idx_Bn.flatten(), minlength=self.codebook.num_embeddings)
+                    self.batch_counts = self.batch_counts + batch_counts
                     # h_BCn, _ = self.get_softvq(rest_NC, B, pn, C, N)
 
                 f_hat = f_hat + h_BCn
@@ -154,3 +156,19 @@ class VectorQuantizer(nn.Module):
         if si == SN-1:
             return f_hat, f_hat
         return f_hat, F.interpolate(f_hat, size=(self.scales[si+1]), mode='area')
+    
+    
+    def get_usage_metrics(self):
+        """返回codebook使用率诊断指标"""
+        # total = self.usage_counts.sum().float()
+        used = (self.usage_counts > 0).sum().float()
+        return {
+            'usage_rate': used / self.codebook.num_embeddings,  # 已使用向量占比
+            'entropy': self._calculate_codebook_entropy(),       # 信息熵
+            'top5_usage': self.usage_counts.topk(5).values       # 最高频使用向量计数
+        }
+    
+    def _calculate_codebook_entropy(self):
+        # 计算codebook使用分布的香农熵
+        prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
+        return -torch.sum(prob * torch.log(prob + 1e-6))
