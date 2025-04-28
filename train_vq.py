@@ -274,5 +274,14 @@ if __name__ == '__main__':
                     # 'avg_val_loss': avg_val_loss,
                 }, ckpt_path)
     except KeyboardInterrupt:
+        ckpt_path = os.path.join(ckpt_dir, '%d_last.pt' % it)
+        torch.save({
+            'config': config,
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'iteration': it,
+            # 'avg_val_loss': avg_val_loss,
+        }, ckpt_path)
         logger.info('Terminating...')
         
