@@ -502,9 +502,9 @@ class FeaFusionLayer(nn.Module):
         # trans = rigid.get_trans() # B, L, 3
         # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
         # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
-        trans = local_transform(trans)
+        trans = (trans * node_mask[..., None]) / node_mask[..., None].sum(dim=1, keepdim=True)
         node_emb_ = self.fusion(torch.cat(
-            [node_emb, rot, self.dist_net(trans/10.)], dim=-1
+            [node_emb, rot, self.dist_net(trans/100.)], dim=-1
         ))
         node_emb = node_emb_ + node_emb
         
@@ -512,13 +512,13 @@ class FeaFusionLayer(nn.Module):
         
         return node_emb * node_mask[..., None]
         
-def local_transform(coords):
-    # 取前三个残基定义局部坐标系
-    v1 = coords[..., 1, :] - coords[..., 0, :]
-    v2 = coords[..., 2, :] - coords[..., 1, :]
-    normal = torch.cross(v1, v2, dim=-1)
-    frame = torch.stack([v1, v2, normal], dim=-1)
-    return torch.bmm(coords, frame)
+# def local_transform(coords):
+#     # 取前三个残基定义局部坐标系
+#     v1 = coords[..., 1, :] - coords[..., 0, :]
+#     v2 = coords[..., 2, :] - coords[..., 1, :]
+#     normal = torch.cross(v1, v2, dim=-1)
+#     frame = torch.stack([v1, v2, normal], dim=-1)
+#     return torch.bmm(coords, frame)
 
 # class GAEncoder(nn.Module):
 #     def __init__(self, ipa_conf):

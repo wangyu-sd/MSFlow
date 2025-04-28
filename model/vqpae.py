@@ -20,6 +20,7 @@ from model.models_con.node import NodeEmbedder
 from model.vqpae_layer import VQPAEBlock
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
 from model.modules.common.geometry import construct_3d_basis
+from torch.nn.utils.rnn import pad_sequence
 # from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
 # from model.utils.misc import seed_all
 # from model.utils.train import sum_weighted_losses
@@ -164,18 +165,34 @@ class VQPAE(nn.Module):
         
         trans_pred_list = [pred_trans_c[i][gen_mask[i]] for i in range(gen_mask.size(0))]
         trans_true_list = [trans[i][gen_mask[i]] for i in range(gen_mask.size(0))]
-        dist_loss = 0.
-        clash_loss = 0.
-        for i in range(gen_mask.size(0)):
-            dist_i = torch.cdist(trans_pred_list[i], trans_pred_list[i])
-            dist_j = torch.cdist(trans_true_list[i], trans_true_list[i])
-            dist_loss += torch.mean((dist_i - dist_j).pow(2))
+        
+        trans_pred_gen, gen_mask_sm = pad_sequence(trans_pred_list, batch_first=True, padding_value=0.0)
+        trans_true_gen, _ = pad_sequence(trans_true_list, batch_first=True, padding_value=0.0)
+        
+        dist_gen_pred = torch.cdist(trans_pred_gen, trans_pred_gen)
+        dist_gen_pred = torch.cdist(trans_true_gen, trans_true_gen)
+        
+        dist_mask = gen_mask_sm[...,None] * gen_mask_sm[...,None].permute(0,2,1)
+        dist_loss = (dist_gen_pred - dist_gen_pred).pow(2) * dist_mask
+        dist_loss = torch.sum(dist_loss, dim=(-1,-2)) / (torch.sum(dist_mask,dim=(-1,-2)) + 1e-8) # (B,)
+        dist_loss = torch.mean(dist_loss)
+        
+        mask = (dist_gen_pred < 3.8) & (dist_gen_pred > 2.0)  # 排除相邻残基
+        clash = torch.where(mask, (3.8 - dist_gen_pred).pow(2), 0.0)
+        clash_loss = torch.sum(clash, dim=(-1,-2)) / (torch.sum(dist_mask,dim=(-1,-2)) + 1e-8) # (B,)
+        fape_loss = self.fape_loss(trans_pred_gen, trans_true_gen, gen_mask_sm)
+        # dist_loss = 0.
+        # clash_loss = 0.
+        # for i in range(gen_mask.size(0)):
+        #     dist_i = torch.cdist(trans_pred_list[i], trans_pred_list[i])
+        #     dist_j = torch.cdist(trans_true_list[i], trans_true_list[i])
+        #     dist_loss += torch.mean((dist_i - dist_j).pow(2))
             
-            mask = (dist_j < 3.8) & (dist_j > 2.0)  # 排除相邻残基
-            clash = torch.where(mask, (3.8 - dist_i).pow(2), 0.0)
-            clash_loss += torch.mean(clash)
-        dist_loss = dist_loss / gen_mask.size(0)
-        fape_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
+        #     mask = (dist_j < 3.8) & (dist_j > 2.0)  # 排除相邻残基
+        #     clash = torch.where(mask, (3.8 - dist_i).pow(2), 0.0)
+        #     clash_loss += torch.mean(clash)
+        # dist_loss = dist_loss / gen_mask.size(0)
+        # fape_loss = self.fape_loss(pred_trans_c, trans, gen_mask)
         
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotmats) 
