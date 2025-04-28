@@ -353,7 +353,7 @@ class ProteinStructureLoss(nn.Module):
         phi = torch.acos(torch.clamp(cos_phi, -1.0, 1.0))
         
         # 判断方向
-        sign = torch.sign(torch.sum(torch.cross(n1, n2) * v2, dim=-1))
+        sign = torch.sign(torch.sum(torch.linalg.cross(n1, n2) * v2, dim=-1))
         return sign * phi  # [B, L-3]
     
     def dist_and_clash_loss(self, pred, target, mask):
