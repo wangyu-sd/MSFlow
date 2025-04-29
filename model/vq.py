@@ -51,74 +51,15 @@ class VectorQuantizer(nn.Module):
         
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
-        
-    def normalize(self, A, dim, mode="all"):
-        if mode == "all":
-            A = (A - A.mean()) / (A.std() + 1e-6)
-            A = A - A.min()
-        elif mode == "dim":
-            A = A / math.sqrt(dim)
-        elif mode == "null":
-            pass
-        return A
     
-    def sinkhorn(self, cost: torch.Tensor, n_iters: int = 3, epsilon: float = 1, is_distributed: bool = False):
-        """
-        Sinkhorn algorithm.
-        Args:
-            cost (Tensor): shape with (B, K)
-        """
-        Q = torch.exp(- cost * epsilon).t() # (K, B)
-        if is_distributed:
-            B = Q.size(1) * dist.get_world_size()
-        else:
-            B = Q.size(1)
-        K = Q.size(0)
-
-        # make the matrix sums to 1
-        sum_Q = torch.sum(Q)
-        if is_distributed:
-            dist.all_reduce(sum_Q)
-        Q /= (sum_Q + 1e-8)
-
-        for _ in range(n_iters):
-            # normalize each row: total weight per prototype must be 1/K
-            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-            if is_distributed:
-                dist.all_reduce(sum_of_rows)
-            Q /= (sum_of_rows + 1e-8)
-            Q /= K
-
-            # normalize each column: total weight per sample must be 1/B
-            Q /= (torch.sum(Q, dim=0, keepdim=True) + 1e-8)
-            Q /= B
-        
-        Q *= B # the columns must sum to 1 so that Q is an assignment
-        return Q.t() # (B, K)
-
     
-    def quantize_input(self, query, reference):
-        # compute the distance matrix
-        query2ref = torch.cdist(query, reference, p=2.0) # (B1, B2)
+    def quantize_input(self, query):
+        d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
+        d_no_grad.addmm_(query, self.embedding.data.T, alpha=-2, beta=1)
+        idx_N = torch.argmin(d_no_grad, dim=1)
+        h_NC = self.embedding[idx_N]
         
-        # compute the assignment matrix
-        with torch.no_grad():
-            is_distributed = dist.is_initialized() and dist.get_world_size() > 1
-            normalized_cost = self.normalize(query2ref, dim=reference.size(1))
-            Q = self.sinkhorn(normalized_cost, n_iters=3, epsilon=1, is_distributed=is_distributed)
-                
-        if self.use_prob:
-            # avoid the zero value problem
-            max_q_id = torch.argmax(Q, dim=-1)
-            Q[torch.arange(Q.size(0)), max_q_id] += 1e-8
-            indices = torch.multinomial(Q, num_samples=1).squeeze()
-        else:
-            indices = torch.argmax(Q, dim=-1)
-        nearest_ref = reference[indices]
-
-        
-        return indices, nearest_ref, query2ref
-
+        return idx_N, h_NC, d_no_grad
 
         
     def forward(self, f_BNC, col_samples=False, vae_stage=False):
