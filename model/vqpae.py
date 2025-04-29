@@ -309,9 +309,11 @@ class ProteinStructureLoss(nn.Module):
         # 计算真实角度
         true_angles = self.compute_ca_angles(target)
         # 周期损失计算
-        sin_loss = torch.sin(pred_angles - true_angles).pow(2)
-        cos_loss = torch.cos(pred_angles - true_angles).pow(2)
-        return self.masked_mean(torch.stack([sin_loss, cos_loss], dim=-1), mask[:, 1:-1])
+        pred_angles = torch.stack([torch.sin(pred_angles), torch.cos(pred_angles)], dim=-1)  # [B, L, 2]
+        true_angles = torch.stack([torch.sin(true_angles), torch.cos(true_angles)], dim=-1)  # [B, L, 2]
+        # 计算损失
+        loss = (pred_angles - true_angles).pow(2)
+        return self.masked_mean(loss, mask[:, 1:-1])
     
     def torsion_loss(self, pred, target, mask):
         """扭转角损失 (四个连续残基)"""
@@ -319,9 +321,10 @@ class ProteinStructureLoss(nn.Module):
         pred_torsion = self.compute_dihedrals(pred)  # [B, L-3, 2]
         true_torsion = self.compute_dihedrals(target)
         # 周期损失计算
-        sin_loss = torch.sin(pred_torsion - true_torsion).pow(2)
-        cos_loss = torch.cos(pred_torsion - true_torsion).pow(2)
-        return self.masked_mean(torch.stack([sin_loss, cos_loss], dim=-1), mask[:, 2:-1])
+        pred_torsion = torch.stack([torch.sin(pred_torsion), torch.cos(pred_torsion)], dim=-1)  # [B, L-3, 2]
+        true_torsion = torch.stack([torch.sin(true_torsion), torch.cos(true_torsion)], dim=-1)
+        loss = (pred_torsion - true_torsion).pow(2)  # [B, L-3, 2]
+        return self.masked_mean(loss, mask[:, 2:-1])
     
     def compute_ca_angles(self, coords):
         """计算三个连续Cα的夹角"""

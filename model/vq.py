@@ -68,7 +68,7 @@ class VectorQuantizer(nn.Module):
         
         pos_loss = -torch.sum(
         sim_matrix[pos_mask] * (1 - sim_matrix.detach().clamp(max=neg_margin))
-        ) / self.codebook_size
+        ) / self.codebook_size / self.codebook_size
 
         # 计算负样本对比损失
         neg_logits = sim_matrix[neg_mask] - neg_margin  # 边界惩罚
