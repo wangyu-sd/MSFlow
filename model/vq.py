@@ -44,7 +44,7 @@ class VectorQuantizer(nn.Module):
         self.use_prob = True
         self.register_buffer("collected_samples", collected_samples)
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
-        self.register_buffer('step', torch.zeros(0., dtype=torch.long))
+        self.register_buffer('step', torch.zeros((1,), dtype=torch.long).squeeze())
     
     
     def reset_counts(self):
