@@ -1,27 +1,28 @@
+import math
 import torch
 from torch import nn
 from torch.nn import functional as F
 from scipy.cluster.vq import kmeans2
 from typing import List
-
-class ReparameterizedCodebook(nn.Module):
-    def __init__(self, codebook_size=128, embedding_dim=512):
-        super().__init__()
-        # 基向量矩阵 (K x base_dim)
-        self.base = nn.Parameter(torch.randn(codebook_size, embedding_dim))  
-        # 可学习投影矩阵
-        self.proj = nn.Linear(embedding_dim, embedding_dim)  
+import torch.distributed as dist
+# class ReparameterizedCodebook(nn.Module):
+#     def __init__(self, codebook_size=128, embedding_dim=512):
+#         super().__init__()
+#         # 基向量矩阵 (K x base_dim)
+#         self.base = nn.Parameter(torch.randn(codebook_size, embedding_dim))  
+#         # 可学习投影矩阵
+#         self.proj = nn.Linear(embedding_dim, embedding_dim)  
         
-        self.reset_parameters()
+#         self.reset_parameters()
         
-    def reset_parameters(self):
-        # 重置参数
-        torch.nn.init.orthogonal_(self.base)
-        torch.nn.init.xavier_uniform_(self.proj.weight)
-        self.proj.bias.data.zero_()
+#     def reset_parameters(self):
+#         # 重置参数
+#         torch.nn.init.orthogonal_(self.base)
+#         torch.nn.init.xavier_uniform_(self.proj.weight)
+#         self.proj.bias.data.zero_()
         
-    def forward(self):
-        return self.proj(self.base)  # 动态生成codebook向量
+#     def forward(self):
+#         return self.proj(self.base)  # 动态生成codebook向量
 class VectorQuantizer(nn.Module):
     def __init__(self, codebook_size, embedding_dim, commitment_cost, init_steps, collect_desired_size, scales):
         super().__init__()
@@ -30,15 +31,14 @@ class VectorQuantizer(nn.Module):
         self.embedding_dim = embedding_dim
         self.commitment_cost = commitment_cost
         self.scales = [2**i for i in range(scales+1)]
-        self.coodbook_generator = ReparameterizedCodebook(codebook_size, embedding_dim)
-        self.register_buffer("embedding", self.coodbook_generator())
-        
-        # self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
+        self.embedding = nn.Embedding(codebook_size, embedding_dim)
+        self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
 
         self.init_steps = init_steps
         self.collect_phase = init_steps > 0
         collected_samples = torch.Tensor(0, self.embedding_dim)
         self.collect_desired_size = collect_desired_size
+        self.use_prob = True
         self.register_buffer("collected_samples", collected_samples)
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
     
@@ -49,36 +49,73 @@ class VectorQuantizer(nn.Module):
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
         
-    def _calculate_diversity_loss(self):
-        """码本向量多样性惩罚项"""
-        # 计算余弦相似度矩阵
-        codebook = self.embedding  # 获取最新码本
-        norm_code = F.normalize(codebook, p=2, dim=1)
-        sim_matrix = torch.mm(norm_code, norm_code.T)  # [K, K]
+    def normalize(self, A, dim, mode="all"):
+        if mode == "all":
+            A = (A - A.mean()) / (A.std() + 1e-6)
+            A = A - A.min()
+        elif mode == "dim":
+            A = A / math.sqrt(dim)
+        elif mode == "null":
+            pass
+        return A
+    
+    def sinkhorn(self, cost: torch.Tensor, n_iters: int = 3, epsilon: float = 1, is_distributed: bool = False):
+        """
+        Sinkhorn algorithm.
+        Args:
+            cost (Tensor): shape with (B, K)
+        """
+        Q = torch.exp(- cost * epsilon).t() # (K, B)
+        if is_distributed:
+            B = Q.size(1) * dist.get_world_size()
+        else:
+            B = Q.size(1)
+        K = Q.size(0)
+
+        # make the matrix sums to 1
+        sum_Q = torch.sum(Q)
+        if is_distributed:
+            dist.all_reduce(sum_Q)
+        Q /= (sum_Q + 1e-8)
+
+        for _ in range(n_iters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            if is_distributed:
+                dist.all_reduce(sum_of_rows)
+            Q /= (sum_of_rows + 1e-8)
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= (torch.sum(Q, dim=0, keepdim=True) + 1e-8)
+            Q /= B
         
+        Q *= B # the columns must sum to 1 so that Q is an assignment
+        return Q.t() # (B, K)
+
+    
+    def quantize_input(self, query, reference):
+        # compute the distance matrix
+        query2ref = torch.cdist(query, reference, p=2.0) # (B1, B2)
+        
+        # compute the assignment matrix
+        with torch.no_grad():
+            is_distributed = dist.is_initialized() and dist.get_world_size() > 1
+            normalized_cost = self.normalize(query2ref, dim=reference.size(1), mode=self.normalize_mode)
+            Q = self.sinkhorn(normalized_cost, n_iters=self.n_iters, epsilon=self.epsilon, is_distributed=is_distributed)
                 
-        # temperature = 0.07  # 温度系数控制困难样本关注度
-        neg_margin = 0.5
-        
-        # 排除对角线元素，惩罚相似度高于0.9的向量对
-        eye_mask = torch.eye(self.codebook_size, device=codebook.device).bool()
-        pos_mask = eye_mask  # 自对比学习模式
-        neg_mask = ~eye_mask
+        if self.use_prob:
+            # avoid the zero value problem
+            max_q_id = torch.argmax(Q, dim=-1)
+            Q[torch.arange(Q.size(0)), max_q_id] += 1e-8
+            indices = torch.multinomial(Q, num_samples=1).squeeze()
+        else:
+            indices = torch.argmax(Q, dim=-1)
+        nearest_ref = reference[indices]
 
         
-        pos_loss = -torch.sum(
-        sim_matrix[pos_mask] * (1 - sim_matrix.detach().clamp(max=neg_margin))
-        ) / self.codebook_size / self.codebook_size
+        return indices, nearest_ref, query2ref
 
-        # 计算负样本对比损失
-        neg_logits = sim_matrix[neg_mask] - neg_margin  # 边界惩罚
-        neg_loss = torch.logsumexp(neg_logits, dim=0)   # InfoNCE核心计算
-        
-        # 组合对比损失项
-        contrastive_loss = pos_loss + neg_loss
-        uniformity = torch.logsumexp(2 * sim_matrix[neg_mask], dim=0).mean()
-        
-        return contrastive_loss + 0.3 * uniformity
 
         
     def forward(self, f_BNC, col_samples=False, vae_stage=False):
@@ -105,11 +142,14 @@ class VectorQuantizer(nn.Module):
                 if vae_stage:
                     h_BCn = F.interpolate(rest_NC.reshape(B, -1, C).permute(0, 2, 1), size=(N), mode='linear').contiguous()
                 else:                 
-                    d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
-                    d_no_grad.addmm_(rest_NC, self.embedding.data.T, alpha=-2, beta=1)
-                    idx_N = torch.argmin(d_no_grad, dim=1)
-                    idx_Bn = idx_N.view(B, pn)
-                    h_BCn = F.interpolate(self.embedding[idx_Bn].permute(0, 2, 1), size=(N), mode='linear').contiguous()
+                    # d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
+                    # d_no_grad.addmm_(rest_NC, self.embedding.data.T, alpha=-2, beta=1)
+                    # idx_N = torch.argmin(d_no_grad, dim=1)
+                    # idx_Bn = idx_N.view(B, pn)
+                    idx_N, h_NC, _ = self.quantize_input(rest_NC, self.embedding.weight.data)
+                    idx_Bn, h_BnC = idx_N.view(B, pn), h_NC.view(B, pn, C)
+                    
+                    h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()
                     batch_counts = torch.bincount(idx_Bn.flatten(), minlength=self.codebook_size)
                     self.batch_counts = self.usage_counts + batch_counts
                     # h_BCn, _ = self.get_softvq(rest_NC, B, pn, C, N)
@@ -129,18 +169,7 @@ class VectorQuantizer(nn.Module):
             divs_loss = self._calculate_diversity_loss()
             
             return f_hat, mean_commitment_loss, mean_q_latent_loss, divs_loss
-        
-    def get_softvq(self, rest_NC, B, pn, C, N):
-        d_no_grad = torch.sum(rest_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
-        d_no_grad.addmm_(rest_NC, self.embedding.data.T, alpha=-2, beta=1)
-        d_no_grad = d_no_grad.softmax(dim=-1)
-        
-        h_NC_soft = d_no_grad @ self.embedding.data # (N, num_codebook) @ (num_codebook, C) = (N, C)
-        # idx_N = torch.argmin(d_no_grad, dim=1)
-        h_BCn = h_NC_soft.view(B, pn, C).permute(0, 2, 1) # (B, C, N)
-        h_BCn = F.interpolate(h_BCn, size=(N), mode='linear').contiguous()
-        
-        return h_BCn, d_no_grad
+    
 
     def collect_samples(self, zq):
         # Collect samples
@@ -176,12 +205,9 @@ class VectorQuantizer(nn.Module):
         for si, pn in enumerate(self.scales):
             # Find the nearest embedding
             z_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
-            d_no_grad = torch.sum(z_NC.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
-            d_no_grad.addmm_(z_NC, self.embedding.data.T, alpha=-2, beta=1)
-            idx_N = torch.argmin(d_no_grad, dim=1)
-            
-            idx_Bn = idx_N.view(B, pn)
-            h_BCn = F.interpolate(self.embedding[idx_Bn].permute(0, 2, 1), size=(N), mode='linear').contiguous()
+            idx_N, h_NC, _ = self.quantize_input(z_NC, self.embedding.weight.data)
+            idx_Bn, h_BnC = idx_N.view(B, pn), h_NC.view(B, pn, C)
+            h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()
             f_hat.add_(h_BCn)
             f_rest.sub_(h_BCn)
             
@@ -202,7 +228,7 @@ class VectorQuantizer(nn.Module):
         # f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
         pn_next = self.scales[0]
         for si in range(SN-1):
-            h = self.embedding[gt_idx_Bl[si]]
+            h = self.embedding(gt_idx_Bl[si])
             h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(pn_next * 2), mode='linear')
             #From: 0,   1, 1, 2, 2, 2, 2
             #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
