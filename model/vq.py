@@ -101,7 +101,7 @@ class VectorQuantizer(nn.Module):
         # compute the assignment matrix
         with torch.no_grad():
             is_distributed = dist.is_initialized() and dist.get_world_size() > 1
-            normalized_cost = self.normalize(query2ref, dim=reference.size(1), mode=self.normalize_mode)
+            normalized_cost = self.normalize(query2ref, dim=reference.size(1))
             Q = self.sinkhorn(normalized_cost, n_iters=3, epsilon=1, is_distributed=is_distributed)
                 
         if self.use_prob:
@@ -166,9 +166,9 @@ class VectorQuantizer(nn.Module):
             f_hat = (f_hat.data - f_no_grad).add_(f_BCN)
             f_hat = f_hat.permute(0, 2, 1) # B, N, C
             # print(self.embedding.weight.data[219, :10])
-            divs_loss = self._calculate_diversity_loss()
+            # divs_loss = self._calculate_diversity_loss()
             
-            return f_hat, mean_commitment_loss, mean_q_latent_loss, divs_loss
+            return f_hat, mean_commitment_loss, mean_q_latent_loss, 0.
     
 
     def collect_samples(self, zq):
