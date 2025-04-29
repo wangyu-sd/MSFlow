@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default=None)
+    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-e957c1f]_2025_04_28__19_07_43/checkpoints/122554_last.pt")
     # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-bfae6e9]_2025_04_28__03_26_39/checkpoints/50002_coodbook.pt")
     parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
