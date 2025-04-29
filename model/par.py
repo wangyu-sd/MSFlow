@@ -137,9 +137,15 @@ class PAR(nn.Module):
         
         return x_BLC, gt_BL
     
-    
     @ torch.no_grad()
     def autoregressive_infer_cfg(self, batch, cfg, top_k, top_p):
+        batch_fea = self.get_batched_fea(batch)
+        loss = self.vqpae(batch)
+        print(loss)
+        return self.postprocess(self.vae_proxy[0].forward(batch_fea), batch_fea)
+    
+    @ torch.no_grad()
+    def autoregressive_infer_cfg_(self, batch, cfg, top_k, top_p):
         
         
         batch_fea = self.get_batched_fea(batch)
@@ -171,7 +177,7 @@ class PAR(nn.Module):
             logits_BLV = (1+t) * logits_BLV[:B] - t * logits_BLV[B:]
 
             idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
-            h_BCn = self.vae_quant_proxy[0].embedding(idx_Bl)   # B, l, Cvae
+            h_BCn = self.vae_quant_proxy[0].embedding[idx_Bl]   # B, l, Cvae
             
             h_BCn = h_BCn.transpose_(1, 2).reshape(B, self.Cvae, pn)
             f_hat, next_token_map = self.vae_quant_proxy[0].get_next_autoregressive_input(si, len(self.scales), f_hat, h_BCn)
@@ -182,8 +188,12 @@ class PAR(nn.Module):
         
         for block in self.blocks:
             block.attn.kv_caching(False)
-            
-        results = self.vae_proxy[0].fhat_to_graph(f_hat.transpose(1, 2), batch_fea, mode='pep_given_poc')
+        
+        gt_BL = self.vqpae.vqvae.graph_to_idxBl(batch_fea, mode='pep_given_poc')
+        gt_BL = torch.cat(gt_BL, dim=1)
+        f_hat_gt = self.vae_quant_proxy[0].embedding[gt_BL]   # B, l, Cvae
+        
+        results = self.vae_proxy[0].fhat_to_graph(f_hat_gt.transpose(1, 2), batch_fea, mode='pep_given_poc')
         return self.postprocess(results, batch_fea)
     
     def postprocess(self, results, batch_fea):

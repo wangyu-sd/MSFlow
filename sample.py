@@ -162,8 +162,8 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:2')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default="log_par/learn_all[main-6243d22]_2025_04_27__18_15_29/checkpoints/26000.pt")
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-26d5e96]_2025_04_27__16_28_29/checkpoints/10000.pt")
+    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/log_par/learn_all[main-3a57fb3]_2025_04_29__14_55_44/checkpoints/20000.pt")
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-e957c1f]_2025_04_28__19_07_43/checkpoints/124433_last.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 
@@ -268,7 +268,7 @@ if __name__ == '__main__':
         batch = recursive_to(batch, args.device)    
         
         for sp_idx in tqdm(range(args.sample_num), desc="Generating Multiple Samples", dynamic_ncols=True):
-            final = model.autoregressive_infer_cfg(batch, cfg=0.1, top_k=5, top_p=0.0)
+            final = model.autoregressive_infer_cfg(batch, cfg=0.0, top_k=5.0, top_p=0.0)
             pos_ha,_,_ = full_atom_reconstruction(R_bb=final['rotmats'],t_bb=final['trans'],angles=final['angles'],aa=final['seqs'])
             pos_ha = F.pad(pos_ha, pad=(0,0,0,15-14), value=0.) # (B,L,A,3) pos14 A=14
             pos_new = torch.where(batch['generate_mask'][:,:,None,None],pos_ha,batch['pos_heavyatom'])

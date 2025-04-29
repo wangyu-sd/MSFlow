@@ -11,7 +11,7 @@ from typing import Tuple, List, Dict
 from model.modules.common.layers import AngularEncoding
 from model.vq import VectorQuantizer
 from dm import so3_utils
-
+from torch.nn.utils.rnn import pad_sequence
 
 
 
@@ -68,11 +68,11 @@ class VQPAEBlock(nn.Module):
         for b in range(self.num_decoder_blocks):
             self._build_block(b, is_encoder=False)
             
-        self.var_prj = nn.Sequential(
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), 
-            nn.LayerNorm(self._ipa_conf.c_s), nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
-        )
+        # self.var_prj = nn.Sequential(
+        #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s), 
+        #     nn.LayerNorm(self._ipa_conf.c_s), nn.ReLU(),
+        #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
+        # )
         self.mu_prj = nn.Sequential(
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
             nn.LayerNorm(self._ipa_conf.c_s), nn.ReLU(),
@@ -166,10 +166,23 @@ class VQPAEBlock(nn.Module):
                 node_embed = x + node_embed
                 
         return node_embed, curr_rigids
-    
+        
+        
+    def extrct_batch_gen(self, batch):
+        batch_gen = {}
+        gen_mask = batch['generate_mask']
+        edge_mask_gen = gen_mask[:, None] * gen_mask[:, :, None]
+        gen_mask, edge_mask_gen = gen_mask.bool(), edge_mask_gen.bool()
+        for key, value in batch.items():
+            mask = edge_mask_gen if 'edge' in key else value.bool()
+            value_list = [value[i][mask[i]] for i in range(value.shape[0])]
+            value_tensor = pad_sequence(value_list, batch_first=True, padding_value=0.)
+            batch_gen[key] = value_tensor
+        return batch_gen
     
     def encoder_step(self, batch, mode):
-        
+        # batch_raw = batch
+        batch = self.extrct_batch_gen(batch)
         if mode == "poc_and_pep" or mode == "pep_given_poc" or mode=='codebook':
             node_mask = batch["res_mask"]
         elif mode == "poc_only":
@@ -202,14 +215,21 @@ class VQPAEBlock(nn.Module):
         mu = mu * node_mask[..., None]
         mu = x + mu
         
-        logvar = self.var_prj(node_embed)
-        logvar = logvar * node_mask[..., None]
-        logvar = x + logvar
+        # logvar = self.var_prj(node_embed)
+        # logvar = logvar * node_mask[..., None]
+        # logvar = x + logvar
         
-        return mu, node_mask, edge_mask, curr_rigids, logvar
+        return mu, batch['generate_mask']
     
-    def decoder_step(self, node_embed, node_emb_raw, edge_embed, curr_rigids, node_mask, 
-                     edge_mask, res_mask, generate_mask,  mode):
+    def decoder_step(self, quantized, batch, mode):
+        
+        node_mask = batch['res_mask']
+        edge_mask = node_mask[:, None] * node_mask[:, :, None]
+        generate_mask = batch['generate_mask']
+        node_emb_raw = batch['node_embed']
+        node_embed = quantized * node_mask[..., None]
+        res_mask = batch['res_mask']
+        edge_embed = batch['edge_embed']
         
         need_poc = mode == "pep_given_poc"
         poc_mask = torch.logical_and(node_mask, 1-generate_mask)
@@ -286,6 +306,7 @@ class VQPAEBlock(nn.Module):
             batch['generate_mask'],
             )
         return node_embed
+    
         
     def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep"):
         """
@@ -295,19 +316,14 @@ class VQPAEBlock(nn.Module):
             _type_: _description_
         """
         node_emb_raw = batch['node_embed']
-        node_embed, node_mask, edge_mask, curr_rigids, _ = self.encoder_step(batch, mode)
-        quantized = self.before_quntized(node_embed, gen_mask=batch['generate_mask']) # TODO Add more choices for gen_mask
+        node_embed_sm, gen_mask_sm = self.encoder_step(batch, mode)
+        quantized = self.before_quntized(node_embed_sm, gen_mask=gen_mask_sm) # TODO Add more choices for gen_mask
         
         quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized)
         
         quantized = self.after_quntized(quantized, gen_mask=batch['generate_mask'])
         
-        res = self.decoder_step(
-            node_embed=quantized, node_emb_raw=node_emb_raw, edge_embed=batch['edge_embed'],
-            curr_rigids=curr_rigids, node_mask=node_mask, edge_mask=edge_mask,
-            res_mask=batch['res_mask'], generate_mask=batch['generate_mask'],
-            mode=mode,
-        )
+        res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
         res['commitment_loss'] = commitment_loss
         res['q_latent_loss'] = q_latent_loss
         res['div_loss'] = div_loss
@@ -372,9 +388,7 @@ class VQPAEBlock(nn.Module):
         
     
     def graph_to_idxBl(self, batch, mode) -> List:
-        node_embed, node_mask, edge_mask, curr_rigids, logvar = self.encoder_step(
-            batch, mode=mode
-        )
+        node_embed = self.encoder_step(batch, mode=mode)
         interpolated_nodes = self.before_quntized(node_embed, gen_mask=batch['generate_mask'])
 
         return self.quantizer.f_to_idxBl(interpolated_nodes)
@@ -502,8 +516,8 @@ class FeaFusionLayer(nn.Module):
         rot = so3_utils.rotmat_to_rotvec(rot)
         rot = self.rot_net(rot)
         # trans = rigid.get_trans() # B, L, 3
-        # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
-        # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
+        dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
+        dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
         # trans = (trans * gen_mask[..., None]) / gen_mask[..., None].sum(dim=1, keepdim=True)
         node_emb_ = self.fusion(torch.cat(
             [node_emb, rot], dim=-1
