@@ -113,20 +113,19 @@ class VQPAEBlock(nn.Module):
         trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
 
 
-        if b < num_blocks-1:
-            # No edge update on the last block.
-            edge_in = self._ipa_conf.c_z
-            trunk[f'edge_transition_{b}'] = ipa_pytorch.EdgeTransition(
-                node_embed_size=self._ipa_conf.c_s,
-                edge_embed_in=edge_in,
-                edge_embed_out=self._ipa_conf.c_z,
-            )
+        # No edge update on the last block.
+        edge_in = self._ipa_conf.c_z
+        trunk[f'edge_transition_{b}'] = ipa_pytorch.EdgeTransition(
+            node_embed_size=self._ipa_conf.c_s,
+            edge_embed_in=edge_in,
+            edge_embed_out=self._ipa_conf.c_z,
+        )
             
 
     def _process_trunk(self, trunk_type, node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask):
         """通用主干处理流程"""
         x = node_embed
-        
+        e = edge_embed
         trunk = self.encoder_trunk if trunk_type == 'encoder' else self.decoder_trunk
         
         # prefix = 'enc_' if trunk_type == 'encoder' else 'dec_'
@@ -157,15 +156,15 @@ class VQPAEBlock(nn.Module):
                     node_embed, rot, trans, node_mask, gen_mask)
                 
 
-                if b < num_blocks-1:
-                    edge_embed = trunk[f'edge_transition_{b}'](
-                        node_embed, edge_embed)
-                    edge_embed *= edge_mask[..., None]
+                edge_embed = trunk[f'edge_transition_{b}'](
+                    node_embed, edge_embed)
+                edge_embed *= edge_mask[..., None]
 
                 
-                node_embed = x + node_embed
+                node_embed = x + node_embed * node_mask[..., None]
+                edge_embed = e + edge_embed * edge_mask[..., None]
                 
-        return node_embed, curr_rigids
+        return node_embed, edge_embed, curr_rigids
         
         
     def extrct_batch_gen(self, batch):
@@ -199,7 +198,7 @@ class VQPAEBlock(nn.Module):
         x = node_embed
         curr_rigids = du.create_rigid(rotmats, trans)
         
-        node_embed, rigids = self._process_trunk(
+        node_embed, rigids, edge_embed = self._process_trunk(
             'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=batch['generate_mask'])
         
         # rotmats = rigids.get_rots().get_rot_mats()
@@ -211,7 +210,7 @@ class VQPAEBlock(nn.Module):
         # rotmats = so3_utils.rotvec_to_rotmat(node_embed[..., -6:-3])
         # curr_rigids = du.create_rigid(rotmats, node_embed[..., -3:])
         
-        mu = self.mu_prj(node_embed)
+        mu = self.mu_prj(node_embed + batch['edge_embed'].mean(dim=-1))
         mu = mu * node_mask[..., None]
         mu = x + mu
         
@@ -229,10 +228,16 @@ class VQPAEBlock(nn.Module):
         node_emb_raw = batch['node_embed']
         node_embed = quantized * node_mask[..., None]
         res_mask = batch['res_mask']
-        edge_embed = batch['edge_embed']
+        edge_embed = batch['edge_embed'] 
         
         need_poc = mode == "pep_given_poc"
         poc_mask = torch.logical_and(node_mask, 1-generate_mask)
+        
+        edge_mask_poc = poc_mask[:, None] * poc_mask[:, :, None]
+        edge_embed = edge_embed * edge_mask_poc[..., None]
+        
+        curr_rigids = du.create_rigid(batch['rotmats'], batch['trans'])
+        
         if need_poc:
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
@@ -242,8 +247,7 @@ class VQPAEBlock(nn.Module):
         node_embed = node_embed * node_mask[..., None]
         
         
-        
-        node_embed, curr_rigids = self._process_trunk(
+        node_embed, curr_rigids, _ = self._process_trunk(
             'decoder', node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask=generate_mask)
         
         # 输出预测
@@ -394,18 +398,9 @@ class VQPAEBlock(nn.Module):
         return self.quantizer.f_to_idxBl(interpolated_nodes)
     
     def fhat_to_graph(self, f_hat, batch, mode):
-        node_mask = batch['res_mask']
-        edge_mask = node_mask[:, None] * node_mask[:, :, None]
-        curr_rigids = du.create_rigid(batch["rotmats"], batch["trans"])
-        
-        quantized = self.after_quntized(f_hat, gen_mask=batch['generate_mask'])
-        
-        res = self.decoder_step(
-            node_embed=quantized, node_emb_raw=batch['node_embed'], edge_embed=batch['edge_embed'],
-            curr_rigids=curr_rigids, node_mask=node_mask, edge_mask=edge_mask,
-            res_mask=batch['res_mask'], generate_mask=batch['generate_mask'],
-            mode=mode,
-        )
+    
+        quantized = self.after_quntized(f_hat, gen_mask=batch['generate_mask'])    
+        res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
 
         return res
 
