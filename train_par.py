@@ -228,6 +228,7 @@ if __name__ == '__main__':
         scalar_dict = {}
         # scalar_dict.update(metric_dict['scalar'])
         scalar_dict.update({
+            'loss_tt': loss.item(),
             'grad': orig_grad_norm,
             'lr': optimizer.param_groups[0]['lr'],
             'time_forward': (time_forward_end - time_start) / 1000,
@@ -235,7 +236,7 @@ if __name__ == '__main__':
         })
         if not args.debug:
             to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
-            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger, counter=None, to_log=to_log)
+            log_losses(loss, None, None, None, scalar_dict, it=it, tag='train', logger=logger, counter=None, to_log=to_log)
 
     def validate(it, mode):
         scalar_accum = ScalarMetricAccumulator()
