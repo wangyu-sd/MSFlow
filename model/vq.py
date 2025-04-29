@@ -33,7 +33,7 @@ class VectorQuantizer(nn.Module):
         self.scales = [2**i for i in range(scales+1)]
         
         self.coodbook_generator = ReparameterizedCodebook(codebook_size, embedding_dim)
-        self.register_buffer("embedding", self.codebook_generator())
+        self.register_buffer("embedding", self.coodbook_generator())
         # self.embedding = nn.Embedding(codebook_size, embedding_dim)
         # self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
 
