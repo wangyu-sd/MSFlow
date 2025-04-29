@@ -38,7 +38,7 @@ class VectorQuantizer(nn.Module):
         # self.register_buffer("embedding", self.coodbook_generator())
         self.embedding = nn.Embedding(codebook_size, embedding_dim)
         # self.embedding = nn.Embedding(codebook_size, embedding_dim)
-        self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
+        torch.nn.init.orthogonal_(self.embedding.weight.data)
 
         self.init_steps = init_steps
         self.collect_phase = init_steps > 0
