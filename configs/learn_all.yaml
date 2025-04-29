@@ -56,8 +56,8 @@ train:
     angle_loss: 1.0
     torsion_loss: 0.5
     vae_loss: 0.5
-    commitment_loss: 0.5
-    q_latent_loss: 0.5
+    commitment_loss: 2.
+    q_latent_loss: 2.
     dist_loss: 0.25
     fape_loss: 0.05
     clash_loss: 0.10
