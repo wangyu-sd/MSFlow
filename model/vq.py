@@ -102,7 +102,7 @@ class VectorQuantizer(nn.Module):
         with torch.no_grad():
             is_distributed = dist.is_initialized() and dist.get_world_size() > 1
             normalized_cost = self.normalize(query2ref, dim=reference.size(1), mode=self.normalize_mode)
-            Q = self.sinkhorn(normalized_cost, n_iters=self.n_iters, epsilon=self.epsilon, is_distributed=is_distributed)
+            Q = self.sinkhorn(normalized_cost, n_iters=3, epsilon=1, is_distributed=is_distributed)
                 
         if self.use_prob:
             # avoid the zero value problem
@@ -126,8 +126,8 @@ class VectorQuantizer(nn.Module):
         f_rest = f_no_grad.clone()
         f_hat  = torch.zeros_like(f_rest)
         
-        if not vae_stage:
-            self.update_embedding()
+        # if not vae_stage:
+        #     self.update_embedding()
 
         with torch.amp.autocast(enabled=False, device_type=f_BCN.device.type):
             mean_q_latent_loss: torch.Tensor = 0.0
