@@ -22,15 +22,15 @@ class VQPAEBlock(nn.Module):
        
         self.angles_embedder = AngularEncoding(num_funcs=12)
         self.angle_net = nn.Sequential(
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.GELU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.GELU(),
             nn.Linear(self._ipa_conf.c_s, 5)
             # nn.Linear(self._ipa_conf.c_s, 22)
         )
         self.current_seq_embedder = nn.Embedding(22, self._ipa_conf.c_s)
         self.seq_net = nn.Sequential(
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.GELU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.GELU(),
             # nn.Linear(self._ipa_conf.c_s, 21)
             nn.Linear(self._ipa_conf.c_s, 22)
         )
@@ -39,7 +39,7 @@ class VQPAEBlock(nn.Module):
         
         self.res_feat_mixer = nn.Sequential(
             nn.Linear(2 * self._ipa_conf.c_s + self.angles_embedder.get_out_dim(in_dim=5), self._ipa_conf.c_s),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
         self.feat_dim = self._ipa_conf.c_s
@@ -75,7 +75,12 @@ class VQPAEBlock(nn.Module):
         # )
         self.mu_prj = nn.Sequential(
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
-            nn.LayerNorm(self._ipa_conf.c_s), nn.ReLU(),
+            nn.LayerNorm(self._ipa_conf.c_s), nn.GELU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
+        )
+        self.edge_to_node = nn.Sequential(
+            nn.Linear(self._ipa_conf.c_z, self._ipa_conf.c_s),
+            nn.LayerNorm(self._ipa_conf.c_s), nn.GELU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         # self.decoder_init_rigid = nn.Sequential(
@@ -173,10 +178,16 @@ class VQPAEBlock(nn.Module):
         edge_mask_gen = gen_mask[:, None] * gen_mask[:, :, None]
         gen_mask, edge_mask_gen = gen_mask.bool(), edge_mask_gen.bool()
         for key, value in batch.items():
-            mask = edge_mask_gen if 'edge' in key else value.bool()
-            value_list = [value[i][mask[i]] for i in range(value.shape[0])]
+            if key == "edge_embed":
+                continue
+            value_list = [value[i][gen_mask[i]] for i in range(value.shape[0])]
             value_tensor = pad_sequence(value_list, batch_first=True, padding_value=0.)
             batch_gen[key] = value_tensor
+            
+        max_num_gen = gen_mask.sum(dim=1).max().item()
+        edge_mask_sm = batch_gen['generate_mask'][:, None] * batch_gen['generate_mask'][:, :, None]
+        batch_gen['edge_embed'] = torch.zeros(gen_mask.size(0), max_num_gen, max_num_gen,batch['edge_embed'].size(-1), device=gen_mask.device)
+        batch_gen['edge_embed'][edge_mask_sm.bool()] = batch['edge_embed'][edge_mask_gen]
         return batch_gen
     
     def encoder_step(self, batch, mode):
@@ -210,7 +221,7 @@ class VQPAEBlock(nn.Module):
         # rotmats = so3_utils.rotvec_to_rotmat(node_embed[..., -6:-3])
         # curr_rigids = du.create_rigid(rotmats, node_embed[..., -3:])
         
-        mu = self.mu_prj(node_embed + batch['edge_embed'].mean(dim=-1))
+        mu = self.mu_prj(node_embed + self.edge_to_node(batch['edge_embed']).mean(dim=-2))
         mu = mu * node_mask[..., None]
         mu = x + mu
         
@@ -247,7 +258,7 @@ class VQPAEBlock(nn.Module):
         node_embed = node_embed * node_mask[..., None]
         
         
-        node_embed, curr_rigids, _ = self._process_trunk(
+        node_embed, _, curr_rigids = self._process_trunk(
             'decoder', node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask=generate_mask)
         
         # 输出预测
@@ -485,8 +496,9 @@ class FeaFusionLayer(nn.Module):
         super().__init__()
         self._ipa_conf = ipa_conf
         self.rot_net = nn.Sequential(
-            nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+            nn.Linear(3, self._ipa_conf.c_s),
+            nn.LayerNorm(self._ipa_conf.c_s),
+            nn.GELU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         # self.dist_net = nn.Sequential(
@@ -499,7 +511,7 @@ class FeaFusionLayer(nn.Module):
         self.fusion = nn.Sequential(
             nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s*2),
             nn.LayerNorm(self._ipa_conf.c_s*2),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s),
             # nn.LayerNorm(self._ipa_conf.c_s),
             # nn.ReLU(),
