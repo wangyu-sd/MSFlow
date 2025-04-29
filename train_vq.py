@@ -182,7 +182,7 @@ if __name__ == '__main__':
         if not args.debug:
             to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
             log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger, to_log=to_log)
-            if to_log:
+            if it % (len_train_dataset // config.train.batch_size) == 0:
                 coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
                 plot_codebook_dist(coodbook_cnt, log_dir, it)
                 model.vqvae.quantizer.reset_counts()
