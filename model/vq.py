@@ -9,9 +9,13 @@ class ReparameterizedCodebook(nn.Module):
     def __init__(self, codebook_size=128, embedding_dim=512):
         super().__init__()
         # 基向量矩阵 (K x base_dim)
-        self.base = nn.Parameter(torch.randn(codebook_size, 32))  
+        self.base = nn.Parameter(torch.randn(codebook_size, embedding_dim))  
         # 可学习投影矩阵
-        self.proj = nn.Linear(32, embedding_dim)  
+        self.proj = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.GELU(),
+            nn.Linear(embedding_dim, embedding_dim),
+        )
         
         self.reset_parameters()
         
