@@ -46,8 +46,8 @@ class VectorQuantizer(nn.Module):
     def reset_counts(self):
         self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
         
-    def update_embedding(self):
-        self.embedding = self.coodbook_generator()
+    # def update_embedding(self):
+    #     self.embedding = self.coodbook_generator()
         
     def normalize(self, A, dim, mode="all"):
         if mode == "all":
