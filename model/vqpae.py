@@ -116,31 +116,31 @@ class VQPAE(nn.Module):
         return pos, center
     
     
-    def fape_loss(self, pred_coords, true_coords, mask):
-        # pred_coords: [B, L, 3]
-        # true_coords: [B, L, 3]
-        # mask: [B, L] (有效残基掩码)
+    # def fape_loss(self, pred_coords, true_coords, mask):
+    #     # pred_coords: [B, L, 3]
+    #     # true_coords: [B, L, 3]
+    #     # mask: [B, L] (有效残基掩码)
         
-        # 计算局部坐标系变换
-        def local_transform(coords):
-            # 取前三个残基定义局部坐标系
-            v1 = coords[..., 1, :] - coords[..., 0, :]
-            v2 = coords[..., 2, :] - coords[..., 1, :]
+    #     # 计算局部坐标系变换
+    #     def local_transform(coords):
+    #         # 取前三个残基定义局部坐标系
+    #         v1 = coords[..., 1, :] - coords[..., 0, :]
+    #         v2 = coords[..., 2, :] - coords[..., 1, :]
             
-            # v1 = v1 / torch.norm(v1, dim=-1, keepdim=True)  # [B, L, 3]
-            # v2 = v2 / torch.norm(v2, dim=-1, keepdim=True)  # [B, L, 3]
-            normal = torch.cross(v1, v2, dim=-1)
-            # normal = normal / torch.norm(normal, dim=-1, keepdim=True)  # [B, L, 3]
-            return torch.stack([v1, v2, normal], dim=-1)  # [B, 3, 3]
+    #         # v1 = v1 / torch.norm(v1, dim=-1, keepdim=True)  # [B, L, 3]
+    #         # v2 = v2 / torch.norm(v2, dim=-1, keepdim=True)  # [B, L, 3]
+    #         normal = torch.cross(v1, v2, dim=-1)
+    #         # normal = normal / torch.norm(normal, dim=-1, keepdim=True)  # [B, L, 3]
+    #         return torch.stack([v1, v2, normal], dim=-1)  # [B, 3, 3]
         
-        pred_frames = local_transform(pred_coords)
-        true_frames = local_transform(true_coords)
+    #     pred_frames = local_transform(pred_coords)
+    #     true_frames = local_transform(true_coords)
         
-        # 计算变换后的坐标差异
-        diff = torch.bmm(pred_coords, pred_frames) - torch.bmm(true_coords, true_frames)
-        loss = diff.pow(2) * mask[..., None]  # [B, L, 3]
-        loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)[..., None]  # [B, L, 3]
-        return loss.sum()
+    #     # 计算变换后的坐标差异
+    #     diff = torch.bmm(pred_coords, pred_frames) - torch.bmm(true_coords, true_frames)
+    #     loss = diff.pow(2) * mask[..., None]  # [B, L, 3]
+    #     loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)[..., None]  # [B, L, 3]
+    #     return loss.sum()
     
     
     def get_loss(self, res, fea_dict, mode, weigeht=1.):
@@ -293,7 +293,7 @@ class ProteinStructureLoss(nn.Module):
         mask:   [B, L]
         """
         valid = mask.sum(dim=-1).clamp(min=1e-6)
-        loss = (tensor * mask).sum(dim=-1) / valid
+        loss = (tensor * mask[..., None]).sum(dim=[-1, -2]) / valid
         return loss.mean()
 
     def position_loss(self, pred, target, mask):
@@ -311,7 +311,7 @@ class ProteinStructureLoss(nn.Module):
         # 周期损失计算
         sin_loss = torch.sin(pred_angles - true_angles).pow(2)
         cos_loss = torch.cos(pred_angles - true_angles).pow(2)
-        return self.masked_mean(sin_loss + cos_loss, mask[:, 1:-1])
+        return self.masked_mean(torch.stack([sin_loss, cos_loss]), mask[:, 1:-1])
     
     def torsion_loss(self, pred, target, mask):
         """扭转角损失 (四个连续残基)"""
@@ -321,7 +321,7 @@ class ProteinStructureLoss(nn.Module):
         # 周期损失计算
         sin_loss = torch.sin(pred_torsion - true_torsion).pow(2)
         cos_loss = torch.cos(pred_torsion - true_torsion).pow(2)
-        return self.masked_mean(sin_loss + cos_loss, mask[:, 2:-1])
+        return self.masked_mean(torch.stack([sin_loss, cos_loss]), mask[:, 2:-1])
     
     def compute_ca_angles(self, coords):
         """计算三个连续Cα的夹角"""
