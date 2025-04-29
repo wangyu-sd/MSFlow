@@ -19,7 +19,7 @@ model:
       commitment_cost: 0.25
       init_steps: 50000
       collect_desired_size: 9000
-      scales: 8
+      scales: 5
 
 par:
   depth: 6

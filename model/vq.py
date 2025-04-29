@@ -56,9 +56,29 @@ class VectorQuantizer(nn.Module):
         norm_code = F.normalize(codebook, p=2, dim=1)
         sim_matrix = torch.mm(norm_code, norm_code.T)  # [K, K]
         
+                
+        # temperature = 0.07  # 温度系数控制困难样本关注度
+        neg_margin = 0.5
+        
         # 排除对角线元素，惩罚相似度高于0.9的向量对
-        mask = (sim_matrix > 0.9) & ~torch.eye(self.codebook_size, device=codebook.device).bool()
-        return torch.sum(sim_matrix[mask]) / self.codebook_size
+        eye_mask = torch.eye(self.codebook_size, device=codebook.device).bool()
+        pos_mask = eye_mask  # 自对比学习模式
+        neg_mask = ~eye_mask
+
+        
+        pos_loss = -torch.sum(
+        sim_matrix[pos_mask] * (1 - sim_matrix.detach().clamp(max=neg_margin))
+        ) / self.codebook_size
+
+        # 计算负样本对比损失
+        neg_logits = sim_matrix[neg_mask] - neg_margin  # 边界惩罚
+        neg_loss = torch.logsumexp(neg_logits, dim=0)   # InfoNCE核心计算
+        
+        # 组合对比损失项
+        contrastive_loss = pos_loss + neg_loss
+        uniformity = torch.logsumexp(2 * sim_matrix[neg_mask], dim=0).mean()
+        
+        return contrastive_loss + 0.3 * uniformity
 
         
     def forward(self, f_BNC, col_samples=False, vae_stage=False):
