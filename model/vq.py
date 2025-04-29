@@ -62,7 +62,7 @@ class VectorQuantizer(nn.Module):
     
     def quantize_input(self, query):
         d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
-        d_no_grad.addmm_(query, self.embedding.embedding.data.T, alpha=-2, beta=1)
+        d_no_grad.addmm_(query, self.embedding.weight.data.T, alpha=-2, beta=1)
         idx_N = torch.argmin(d_no_grad, dim=1)
         h_NC = self.embedding(idx_N)
         
