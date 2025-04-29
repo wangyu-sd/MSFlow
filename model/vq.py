@@ -32,7 +32,7 @@ class VectorQuantizer(nn.Module):
         self.commitment_cost = commitment_cost
         self.scales = [2**i for i in range(scales+1)]
         
-        self.codebook_generator = ReparameterizedCodebook(codebook_size, embedding_dim)
+        self.coodbook_generator = ReparameterizedCodebook(codebook_size, embedding_dim)
         self.register_buffer("embedding", self.codebook_generator())
         # self.embedding = nn.Embedding(codebook_size, embedding_dim)
         # self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
@@ -47,7 +47,7 @@ class VectorQuantizer(nn.Module):
     
     
     def reset_counts(self):
-        self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.data.device)
+        self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
         
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
