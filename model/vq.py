@@ -90,7 +90,7 @@ class VectorQuantizer(nn.Module):
                     # d_no_grad.addmm_(rest_NC, self.embedding.data.T, alpha=-2, beta=1)
                     # idx_N = torch.argmin(d_no_grad, dim=1)
                     # idx_Bn = idx_N.view(B, pn)
-                    idx_N, h_NC, _ = self.quantize_input(rest_NC, self.embedding.data)
+                    idx_N, h_NC, _ = self.quantize_input(rest_NC)
                     idx_Bn, h_BnC = idx_N.view(B, pn), h_NC.view(B, pn, C)
                     
                     h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()
@@ -149,7 +149,7 @@ class VectorQuantizer(nn.Module):
         for si, pn in enumerate(self.scales):
             # Find the nearest embedding
             z_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
-            idx_N, h_NC, _ = self.quantize_input(z_NC, self.embedding.data)
+            idx_N, h_NC, _ = self.quantize_input(z_NC)
             idx_Bn, h_BnC = idx_N.view(B, pn), h_NC.view(B, pn, C)
             h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()
             f_hat.add_(h_BCn)
