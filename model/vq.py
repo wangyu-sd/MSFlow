@@ -20,10 +20,9 @@ class ReparameterizedCodebook(nn.Module):
         self.reset_parameters()
         
     def reset_parameters(self):
-        # 重置参数
+        # 重置参数y
         torch.nn.init.orthogonal_(self.base)
-        torch.nn.init.xavier_uniform_(self.proj.weight)
-        self.proj.bias.data.zero_()
+        torch.nn.init.xavier_uniform_(self.proj.parameters())
         
     def forward(self):
         return self.proj(self.base)  # 动态生成codebook向量
