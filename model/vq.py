@@ -5,24 +5,24 @@ from torch.nn import functional as F
 from scipy.cluster.vq import kmeans2
 from typing import List
 import torch.distributed as dist
-# class ReparameterizedCodebook(nn.Module):
-#     def __init__(self, codebook_size=128, embedding_dim=512):
-#         super().__init__()
-#         # 基向量矩阵 (K x base_dim)
-#         self.base = nn.Parameter(torch.randn(codebook_size, embedding_dim))  
-#         # 可学习投影矩阵
-#         self.proj = nn.Linear(embedding_dim, embedding_dim)  
+class ReparameterizedCodebook(nn.Module):
+    def __init__(self, codebook_size=128, embedding_dim=512):
+        super().__init__()
+        # 基向量矩阵 (K x base_dim)
+        self.base = nn.Parameter(torch.randn(codebook_size, embedding_dim))  
+        # 可学习投影矩阵
+        self.proj = nn.Linear(embedding_dim, embedding_dim)  
         
-#         self.reset_parameters()
+        self.reset_parameters()
         
-#     def reset_parameters(self):
-#         # 重置参数
-#         torch.nn.init.orthogonal_(self.base)
-#         torch.nn.init.xavier_uniform_(self.proj.weight)
-#         self.proj.bias.data.zero_()
+    def reset_parameters(self):
+        # 重置参数
+        torch.nn.init.orthogonal_(self.base)
+        torch.nn.init.xavier_uniform_(self.proj.weight)
+        self.proj.bias.data.zero_()
         
-#     def forward(self):
-#         return self.proj(self.base)  # 动态生成codebook向量
+    def forward(self):
+        return self.proj(self.base)  # 动态生成codebook向量
 class VectorQuantizer(nn.Module):
     def __init__(self, codebook_size, embedding_dim, commitment_cost, init_steps, collect_desired_size, scales):
         super().__init__()
@@ -31,8 +31,11 @@ class VectorQuantizer(nn.Module):
         self.embedding_dim = embedding_dim
         self.commitment_cost = commitment_cost
         self.scales = [2**i for i in range(scales+1)]
-        self.embedding = nn.Embedding(codebook_size, embedding_dim)
-        self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
+        
+        self.codebook_generator = ReparameterizedCodebook(codebook_size, embedding_dim)
+        self.register_buffer("embedding", self.codebook_generator())
+        # self.embedding = nn.Embedding(codebook_size, embedding_dim)
+        # self.embedding.weight.data.uniform_(-1/codebook_size, 1/codebook_size)
 
         self.init_steps = init_steps
         self.collect_phase = init_steps > 0
@@ -46,8 +49,8 @@ class VectorQuantizer(nn.Module):
     def reset_counts(self):
         self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.data.device)
         
-    # def update_embedding(self):
-    #     self.embedding = self.coodbook_generator()
+    def update_embedding(self):
+        self.embedding = self.coodbook_generator()
         
     def normalize(self, A, dim, mode="all"):
         if mode == "all":
@@ -126,8 +129,8 @@ class VectorQuantizer(nn.Module):
         f_rest = f_no_grad.clone()
         f_hat  = torch.zeros_like(f_rest)
         
-        # if not vae_stage:
-        #     self.update_embedding()
+        if not vae_stage:
+            self.update_embedding()
 
         with torch.amp.autocast(enabled=False, device_type=f_BCN.device.type):
             mean_q_latent_loss: torch.Tensor = 0.0
@@ -146,7 +149,7 @@ class VectorQuantizer(nn.Module):
                     # d_no_grad.addmm_(rest_NC, self.embedding.data.T, alpha=-2, beta=1)
                     # idx_N = torch.argmin(d_no_grad, dim=1)
                     # idx_Bn = idx_N.view(B, pn)
-                    idx_N, h_NC, _ = self.quantize_input(rest_NC, self.embedding.weight.data)
+                    idx_N, h_NC, _ = self.quantize_input(rest_NC, self.embedding.data)
                     idx_Bn, h_BnC = idx_N.view(B, pn), h_NC.view(B, pn, C)
                     
                     h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()
@@ -205,7 +208,7 @@ class VectorQuantizer(nn.Module):
         for si, pn in enumerate(self.scales):
             # Find the nearest embedding
             z_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
-            idx_N, h_NC, _ = self.quantize_input(z_NC, self.embedding.weight.data)
+            idx_N, h_NC, _ = self.quantize_input(z_NC, self.embedding.data)
             idx_Bn, h_BnC = idx_N.view(B, pn), h_NC.view(B, pn, C)
             h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()
             f_hat.add_(h_BCn)
@@ -228,7 +231,7 @@ class VectorQuantizer(nn.Module):
         # f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
         pn_next = self.scales[0]
         for si in range(SN-1):
-            h = self.embedding(gt_idx_Bl[si])
+            h = self.embedding.data[gt_idx_Bl[si]]
             h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(pn_next * 2), mode='linear')
             #From: 0,   1, 1, 2, 2, 2, 2
             #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
