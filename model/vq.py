@@ -112,9 +112,13 @@ class VectorQuantizer(nn.Module):
             f_hat = (f_hat.data - f_no_grad).add_(f_BCN)
             f_hat = f_hat.permute(0, 2, 1) # B, N, C
             # print(self.embedding.weight.data[219, :10])
-            # divs_loss = self._calculate_diversity_loss()
+            divs_loss = self._calculate_diversity_loss()
             
-            return f_hat, mean_commitment_loss, mean_q_latent_loss, 0.
+            return f_hat, mean_commitment_loss, mean_q_latent_loss, divs_loss
+        
+    def _calculate_diversity_loss(self):
+        dist = torch.cdist(self.embedding, self.embedding)
+        return dist.mean()
     
 
     def collect_samples(self, zq):
