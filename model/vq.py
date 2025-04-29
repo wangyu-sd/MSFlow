@@ -53,7 +53,7 @@ class VectorQuantizer(nn.Module):
     def reset_counts(self):
         self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
         k = kmeans2(self.embedding.weight.data.cpu().numpy(), self.codebook_size, minit='++')[0]
-        self.embedding.weight.data = torch.from_numpy(k).to(self.embedding.device)
+        self.embedding.weight.data = torch.from_numpy(k).to(self.embedding.weight.device)
         
     # def update_embedding(self):
     #     # self.embedding = self.coodbook_generator()
