@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 import numpy as np
 from scipy import stats
-
+import wandb
 def calc_statistics(arr, threshold=0.1):
     # 中位数和分位数（兼容空数组）
     median_val = np.median(arr) if len(arr) > 0 else 0
@@ -107,3 +107,5 @@ def plot_codebook_dist(coodbook_cnt, log_dir, it):
   
   print(f"Saved enhanced visualization to {save_path}")
   plt.close(fig)
+  
+  wandb.log({'codebook_usage': stats_dict['usage_rate']}, step=it)
