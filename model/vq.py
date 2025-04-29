@@ -118,7 +118,7 @@ class VectorQuantizer(nn.Module):
         
     def _calculate_diversity_loss(self):
         dist = torch.cdist(self.embedding, self.embedding)
-        return dist.mean()
+        return -dist.mean()
     
 
     def collect_samples(self, zq):
