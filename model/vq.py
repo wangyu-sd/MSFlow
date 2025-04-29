@@ -9,9 +9,9 @@ class ReparameterizedCodebook(nn.Module):
     def __init__(self, codebook_size=128, embedding_dim=512):
         super().__init__()
         # 基向量矩阵 (K x base_dim)
-        self.base = nn.Parameter(torch.randn(codebook_size, embedding_dim))  
+        self.base = nn.Parameter(torch.randn(codebook_size, 32))  
         # 可学习投影矩阵
-        self.proj = nn.Linear(embedding_dim, embedding_dim)  
+        self.proj = nn.Linear(32, embedding_dim)  
         
         self.reset_parameters()
         
@@ -44,6 +44,7 @@ class VectorQuantizer(nn.Module):
         self.use_prob = True
         self.register_buffer("collected_samples", collected_samples)
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
+        self.register_buffer('step', 0.)
     
     
     def reset_counts(self):
@@ -51,7 +52,7 @@ class VectorQuantizer(nn.Module):
         
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
-    
+        
     
     def quantize_input(self, query):
         d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
@@ -72,6 +73,7 @@ class VectorQuantizer(nn.Module):
         
         if not vae_stage:
             self.update_embedding()
+            # self.step
 
         with torch.amp.autocast(enabled=False, device_type=f_BCN.device.type):
             mean_q_latent_loss: torch.Tensor = 0.0
