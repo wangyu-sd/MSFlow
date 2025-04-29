@@ -95,7 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-26d5e96]_2025_04_27__16_28_29/checkpoints/10000.pt")
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-e957c1f]_2025_04_28__19_07_43/checkpoints/124433_last.pt")
     # /remote-home/wangyu/VQ-PAR/log_par/learn_all[main-d443eff]_2025_04_23__15_00_18/checkpoints/36000.pt
     parser.add_argument('--name', type=str, default='train_par')
     # parser.add_argument('--codebook_init', default=False, action='store_true')
@@ -105,10 +105,10 @@ if __name__ == '__main__':
     # Version control
     branch, version = get_version()
     version_short = '%s-%s' % (branch, version[:7])
-    # if has_changes() and not args.debug:
-    #     c = input('Start training anyway? (y/n) ')
-    #     if c != 'y':
-    #         exit()
+    if has_changes() and not args.debug:
+        c = input('Start training anyway? (y/n) ')
+        if c != 'y':
+            exit()
 
     # Load configs
 
@@ -152,7 +152,7 @@ if __name__ == '__main__':
     train_iterator = inf_iterator(train_loader)
     val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size_pr, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     logger.info('Train %d | Val %d' % (len(train_dataset), len(val_dataset)))
-
+    len_train_dataset = len(train_dataset)
     # Model
     logger.info('Building model...')
     # model = get_model(config.model).to(args.device)
@@ -234,7 +234,8 @@ if __name__ == '__main__':
             'time_backward': (time_backward_end - time_forward_end) / 1000,
         })
         if not args.debug:
-            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger, counter=None)
+            to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
+            log_losses(loss, {"loss":{loss}}, None, None, scalar_dict, it=it, tag='train', logger=logger, counter=None, to_log=to_log)
 
     def validate(it, mode):
         scalar_accum = ScalarMetricAccumulator()
@@ -281,7 +282,19 @@ if __name__ == '__main__':
                     # 'avg_val_loss': avg_val_loss,
                 }, ckpt_path)
     except KeyboardInterrupt:
+        ckpt_path = os.path.join(ckpt_dir, '%d_last.pt' % it)
+        torch.save({
+            'config': config,
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'iteration': it,
+            # 'avg_val_loss': avg_val_loss,
+        }, ckpt_path)
         logger.info('Terminating...')
+        print('Current iteration: %d' % it)
+        print("Log dir:", log_dir)
+        print('Last checkpoint saved to %s' % ckpt_path)
         
         
 
