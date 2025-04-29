@@ -495,7 +495,7 @@ class FeaFusionLayer(nn.Module):
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         # self.dist_net = nn.Sequential(
-        #     nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
+        #     nn.Linear(1, self._ipa_conf.c_s),nn.ReLU(),
         #     nn.LayerNorm(self._ipa_conf.c_s),
         #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
         #     nn.LayerNorm(self._ipa_conf.c_s),
@@ -506,9 +506,9 @@ class FeaFusionLayer(nn.Module):
             nn.LayerNorm(self._ipa_conf.c_s*2),
             nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s),
-            nn.LayerNorm(self._ipa_conf.c_s),
-            nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
+            # nn.LayerNorm(self._ipa_conf.c_s),
+            # nn.ReLU(),
+            # nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
         
     def forward(self, node_emb, rot, trans, node_mask, gen_mask):
@@ -516,8 +516,9 @@ class FeaFusionLayer(nn.Module):
         rot = so3_utils.rotmat_to_rotvec(rot)
         rot = self.rot_net(rot)
         # trans = rigid.get_trans() # B, L, 3
-        dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
-        dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
+        # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
+        # edge_mask = node_mask[:, None] * node_mask[:, :, None]
+        # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
         # trans = (trans * gen_mask[..., None]) / gen_mask[..., None].sum(dim=1, keepdim=True)
         node_emb_ = self.fusion(torch.cat(
             [node_emb, rot], dim=-1
