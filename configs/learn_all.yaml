@@ -81,7 +81,7 @@ train:
   scheduler:
     type: plateau
     factor: 0.8
-    patience: 10
+    patience: 20
     min_lr: 5.e-6
 
 dataset:
