@@ -38,7 +38,7 @@ if __name__ == '__main__':
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
     # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-bfae6e9]_2025_04_28__03_26_39/checkpoints/50002_coodbook.pt")
-    parser.add_argument('--from_pretrain', type=str, default="logs/learn_all[main-36fe0f2]_2025_04_29__21_39_14/checkpoints/140000.pt")
+    parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
     args = parser.parse_args()

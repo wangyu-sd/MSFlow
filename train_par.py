@@ -95,7 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-e957c1f]_2025_04_28__19_07_43/checkpoints/124433_last.pt")
+    parser.add_argument('--from_pretrain', type=str, default="logs/learn_all[main-36fe0f2]_2025_04_29__21_39_14/checkpoints/140000.pt")
     # /remote-home/wangyu/VQ-PAR/log_par/learn_all[main-d443eff]_2025_04_23__15_00_18/checkpoints/36000.pt
     parser.add_argument('--name', type=str, default='train_par')
     # parser.add_argument('--codebook_init', default=False, action='store_true')
