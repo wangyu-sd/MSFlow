@@ -403,8 +403,8 @@ class VQPAEBlock(nn.Module):
         
     
     def graph_to_idxBl(self, batch, mode) -> List:
-        node_embed = self.encoder_step(batch, mode=mode)
-        interpolated_nodes = self.before_quntized(node_embed, gen_mask=batch['generate_mask'])
+        node_embed, mask = self.encoder_step(batch, mode=mode)
+        interpolated_nodes = self.before_quntized(node_embed, gen_mask=mask)
 
         return self.quantizer.f_to_idxBl(interpolated_nodes)
     
