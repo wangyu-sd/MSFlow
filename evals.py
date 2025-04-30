@@ -37,7 +37,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-cdf5f7d]_2025_04_27__18_30_16/results')
     # parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-98e0b67]_2025_04_27__21_06_12/results')
-    parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-3a57fb3]_2025_04_29__16_08_59/results')
+    parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-87bad41]_2025_04_30__16_57_56/results')
     args = parser.parse_args()
     
     logger_dir = args.eval_dir.replace('results', 'eval_res')
@@ -52,8 +52,12 @@ if __name__ == '__main__':
       batch_size = len(os.listdir(path_current)) - 1
       
       pep_chain_id = pdb_ids.split('_')[1]
-      pdb_gt = os.path.join(path_current, pdb_ids+"_gt.pdb")
-      pdb_gt = PepComp(pdb_gt, pep_chain_id)
+      try:
+        pdb_gt = os.path.join(path_current, pdb_ids+"_gt.pdb")
+        pdb_gt = PepComp(pdb_gt, pep_chain_id)
+      except Exception as e:
+        logger.info(f"Error in {pdb_ids}: {e}")
+        continue
       for sp_idx in range(batch_size):
         pdb_curr = os.path.join(path_current, f"{pdb_ids}_{sp_idx}.pdb")
         pdb_curr = PepComp(pdb_curr, pep_chain_id)

@@ -59,16 +59,22 @@ class VectorQuantizer(nn.Module):
     #     if 
         
     
-    def quantize_input(self, query):
+    def quantize_input(self, query, sampling=False):
         d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
         d_no_grad.addmm_(query, self.embedding.data.T, alpha=-2, beta=1)
-        idx_N = torch.argmin(d_no_grad, dim=1)
+        
+        if sampling:
+            weight = F.softmax(-d_no_grad, dim=1)
+            weight = weight / weight.sum(dim=1, keepdim=True)
+            idx_N = torch.multinomial(weight, 1).squeeze(1)
+        else:
+            idx_N = torch.argmin(d_no_grad, dim=1)
         h_NC = self.embedding[idx_N]
         
         return idx_N, h_NC, d_no_grad
 
         
-    def forward(self, f_BNC, col_samples=False, vae_stage=False):
+    def forward(self, f_BNC, col_samples=False, vae_stage=False, sampling=False):
         f_BCN = f_BNC.permute(0, 2, 1)
         B, C, N = f_BCN.shape
 
@@ -97,7 +103,7 @@ class VectorQuantizer(nn.Module):
                     # d_no_grad.addmm_(rest_NC, self.embedding.data.T, alpha=-2, beta=1)
                     # idx_N = torch.argmin(d_no_grad, dim=1)
                     # idx_Bn = idx_N.view(B, pn)
-                    idx_N, h_NC, _ = self.quantize_input(rest_NC)
+                    idx_N, h_NC, _ = self.quantize_input(rest_NC, sampling=sampling)
                     idx_Bn, h_BnC = idx_N.view(B, pn), h_NC.view(B, pn, C)
                     
                     h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()

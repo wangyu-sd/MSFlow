@@ -56,15 +56,17 @@ class VQPAE(nn.Module):
     def __init__(self,cfg):
         super().__init__()
         self._model_cfg = cfg.encoder
-        self.node_embedder = NodeEmbedder(cfg.encoder.node_embed_size,max_num_heavyatoms)
-        self.edge_embedder = EdgeEmbedder(cfg.encoder.edge_embed_size,max_num_heavyatoms)
+        self.node_embedder = NodeEmbedder(cfg.encoder.node_embed_size, 3)
+        self.edge_embedder = EdgeEmbedder(cfg.encoder.edge_embed_size, 3)
         self.vqvae: VQPAEBlock = VQPAEBlock(cfg.encoder.ipa)
         self.strc_loss_fn = ProteinStructureLoss()
         # self.node_proj = nn.Linear(cfg.encoder.node_embed_size, cfg.encoder.ipa.c_s)
         # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
-                
+
+
     
-    def extract_fea(self, batch):
+    
+    def extract_fea(self, batch, pep_only=False):
         rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])      
         trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
         seqs_1 = batch['aa']
