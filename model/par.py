@@ -140,7 +140,7 @@ class PAR(nn.Module):
     @ torch.no_grad()
     def autoregressive_infer_cfg(self, batch, cfg, top_k, top_p):
         batch_fea = self.get_batched_fea(batch)
-        loss = self.vqpae(batch)
+        loss = self.vqpae(batch, mode='pep_given_poc')
         print(loss)
         return self.postprocess(self.vae_proxy[0].forward(batch_fea), batch_fea)
     

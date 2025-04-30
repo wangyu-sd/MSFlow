@@ -162,8 +162,8 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:2')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/log_par/learn_all[main-3a57fb3]_2025_04_29__14_55_44/checkpoints/20000.pt")
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-e957c1f]_2025_04_28__19_07_43/checkpoints/124433_last.pt")
+    parser.add_argument('--resume', type=str, default=None)
+    parser.add_argument('--from_pretrain', type=str, default="logs/learn_all[main-36fe0f2]_2025_04_29__21_39_14/checkpoints/140000.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 
@@ -237,8 +237,11 @@ if __name__ == '__main__':
     
     # wandb.watch(model,log='all',log_freq=1)
     logger.info('Load pretrain model from checkpoint: %s' % args.resume)
-    ckpt = torch.load(args.resume, map_location=args.device, weights_only=True)
-    model_par: PAR = PAR(model_vq, ckpt['config']).to(args.device)
+    if args.resume is not None:
+        ckpt = torch.load(args.resume, map_location=args.device, weights_only=True)
+        model_par: PAR = PAR(model_vq, ckpt['config']).to(args.device)
+    else:
+        model_par: PAR = PAR(model_vq, config).to(args.device)
     logger.info(f'Number of parameters for model: {count_parameters(model_vq)*1e-7:.2f}M')
     logger.info(f'Number of parameters for model_par: {count_parameters(model_par)*1e-7:.2f}M')
     
