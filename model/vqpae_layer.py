@@ -155,10 +155,10 @@ class VQPAEBlock(nn.Module):
                 curr_rigids = curr_rigids.compose_q_update_vec(
                     rigid_update, node_mask[..., None])
                 
-                rot = curr_rigids.get_rots().get_rot_mats()
-                trans = curr_rigids.get_trans()
-                node_embed = trunk[f'fea_fusion_{b}'](
-                    node_embed, rot, trans, node_mask, gen_mask)
+                # rot = curr_rigids.get_rots().get_rot_mats()
+                # trans = curr_rigids.get_trans()
+                # node_embed = trunk[f'fea_fusion_{b}'](
+                #     node_embed, rot, trans, node_mask, gen_mask)
                 
 
                 edge_embed = trunk[f'edge_transition_{b}'](
