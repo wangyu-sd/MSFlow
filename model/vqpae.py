@@ -163,7 +163,7 @@ class VQPAE(nn.Module):
         pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_c, gen_mask)
         trans_gen = self.strc_loss_fn.extract_fea_from_gen(trans, gen_mask)
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
-        pred_trans_c, _, rot = batch_align(pred_trans_gen, trans_gen, gen_mask)
+        pred_trans_c, _, rot = batch_align(pred_trans_gen, trans_gen, gen_mask.bool())
         trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
         
