@@ -35,7 +35,7 @@ class VQPAEBlock(nn.Module):
             nn.Linear(self._ipa_conf.c_s, 22)
         )
         
-        self.str_fea_fusion = FeaFusionLayer(ipa_conf)
+        # self.str_fea_fusion = FeaFusionLayer(ipa_conf)s
         
         self.res_feat_mixer = nn.Sequential(
             nn.Linear(2 * self._ipa_conf.c_s + self.angles_embedder.get_out_dim(in_dim=5), self._ipa_conf.c_s),
@@ -115,7 +115,7 @@ class VQPAEBlock(nn.Module):
         
         trunk[f'bb_update_{b}'] = ipa_pytorch.BackboneUpdate(
             self._ipa_conf.c_s, use_rot_updates=True)
-        trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
+        # trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
 
 
         # No edge update on the last block.
@@ -229,7 +229,7 @@ class VQPAEBlock(nn.Module):
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
         
-        return mu, batch['generate_mask']
+        return mu, batch['generate_mask'], rigids
     
     def decoder_step(self, quantized, batch, mode):
         
@@ -314,12 +314,12 @@ class VQPAEBlock(nn.Module):
             self.angles_embedder(angles).reshape(num_batch,num_res,-1)
             ],dim=-1))
         
-        node_embed = self.str_fea_fusion(
-            node_embed, 
-            batch['rotmats'], batch['trans'], 
-            node_mask,
-            batch['generate_mask'],
-            )
+        # node_embed = self.str_fea_fusion(
+        #     node_embed, 
+        #     batch['rotmats'], batch['trans'], 
+        #     node_mask,
+        #     batch['generate_mask'],
+        #     )
         return node_embed
     
         
@@ -501,13 +501,14 @@ class FeaFusionLayer(nn.Module):
             nn.GELU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
-        # self.dist_net = nn.Sequential(
-        #     nn.Linear(1, self._ipa_conf.c_s),nn.ReLU(),
-        #     nn.LayerNorm(self._ipa_conf.c_s),
-        #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-        #     nn.LayerNorm(self._ipa_conf.c_s),
-        #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s // 2),
-        # )
+        self.dist_net = nn.Sequential(
+            nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
+            nn.LayerNorm(self._ipa_conf.c_s),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+            nn.LayerNorm(self._ipa_conf.c_s),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
+        )
+        
         self.fusion = nn.Sequential(
             nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s*2),
             nn.LayerNorm(self._ipa_conf.c_s*2),
@@ -526,7 +527,7 @@ class FeaFusionLayer(nn.Module):
         # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
         # edge_mask = node_mask[:, None] * node_mask[:, :, None]
         # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
-        # trans = (trans * gen_mask[..., None]) / gen_mask[..., None].sum(dim=1, keepdim=True)
+        trans = (trans * gen_mask[..., None]) / gen_mask[..., None].sum(dim=1, keepdim=True)
         node_emb_ = self.fusion(torch.cat(
             [node_emb, rot], dim=-1
         ))

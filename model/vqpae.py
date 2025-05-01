@@ -20,7 +20,7 @@ from model.models_con.node import NodeEmbedder
 # from model.modules.common.layers import sample_from, clampped_one_hot
 from model.vqpae_layer import VQPAEBlock
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
-from model.modules.common.geometry import construct_3d_basis
+from model.modules.common.geometry import construct_3d_basis, batch_align
 from torch.nn.utils.rnn import pad_sequence
 from model.models_con import torus
 # from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
@@ -62,20 +62,16 @@ class VQPAE(nn.Module):
         self.strc_loss_fn = ProteinStructureLoss()
         # self.node_proj = nn.Linear(cfg.encoder.node_embed_size, cfg.encoder.ipa.c_s)
         # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
-
-
     
-    
-    def extract_fea(self, batch, pep_only=False):
+    def extract_fea(self, batch):
         rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])      
         trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
         seqs_1 = batch['aa']
-
+    
         angles_1 = batch['torsion_angle']
-
         # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         # structure_mask = context_mask 
-        # sequence_mask = context_mask 
+        # sequence_mask = context_mask
         
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
                                         batch['mask_heavyatom'], structure_mask=batch['res_mask'], sequence_mask=batch['res_mask'])
@@ -95,7 +91,7 @@ class VQPAE(nn.Module):
             "angles": angles_1, 
             "seqs": seqs_1, 
             "node_embed": node_embed, 
-            "edge_embed": edge_embed,
+            # "edge_embed": edge_embed,
             "generate_mask": gen_mask,
             "res_mask": res_mask,
         }
@@ -164,16 +160,25 @@ class VQPAE(nn.Module):
         
         
         pred_trans_c, _ = self.zero_center_part(pred_trans, gen_mask, res_mask)
-        trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
+        pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_c, gen_mask)
+        trans_gen = self.strc_loss_fn.extract_fea_from_gen(trans_gen, gen_mask)
+        gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
+        pred_trans_c, _, rot = batch_align(pred_trans_gen, trans_gen, gen_mask)
+        trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
         
         
         strc_loss = self.strc_loss_fn(pred_trans_c, trans, gen_mask)
         
-        rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats)
-        pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotmats) 
-        rot_loss = torch.sum(((rotamats_vec - pred_rotmats_vec))**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
+        pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotamats, gen_mask)
+        rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats_gen) 
+        pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot@pred_rotamats_gen) 
+        rot_loss = torch.sum(((rotamats_vec - pred_rotmats_vec))**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
         rot_loss = torch.mean(rot_loss)
+        
+        global_pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot)
+        global_rotmats_loss = torch.sum(((global_pred_rotmats_vec - 0.))**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8)
+        global_rotmats_loss = torch.mean(global_rotmats_loss)
         
         
         # bb aux loss
@@ -217,6 +222,7 @@ class VQPAE(nn.Module):
             "clash_loss": strc_loss['clash_loss'] * weigeht,
             "bb_angle_loss": strc_loss['bb_angle_loss'] * weigeht,
             "bb_torsion_loss": strc_loss['bb_torsion_loss'] * weigeht,
+            "global_rotmats_loss": global_rotmats_loss * weigeht,
         }
         
         for key in res.keys():
@@ -401,7 +407,7 @@ class ProteinStructureLoss(nn.Module):
         squared_diff = torch.sum((aligned_pred - pos_target), dim=-1)  # (B,N)
         l2_dist = torch.sqrt(squared_diff + 1e-6)  # 数值稳定
         
-        # 步骤3：应用mask过滤无效位置[6,8](@ref)
+        # 步骤3：应用mask过滤无效位置[6,8]
         valid_loss = l2_dist * mask  # (B,N)
         
         # 步骤4：计算加权平均损失
@@ -475,7 +481,7 @@ def kabsch_transform(pred, target, mask):
     
     # 应用旋转平移
     aligned_pred = torch.einsum('bij,bnj->bni', R, pred_centered) + center_target.unsqueeze(1)
-    return aligned_pred
+    return aligned_pred, R
 
 
 # if __name__ == '__main__':

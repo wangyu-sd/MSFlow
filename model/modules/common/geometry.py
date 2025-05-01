@@ -35,6 +35,28 @@ def align(
 
     return pos_1_aligned, pos_2
 
+
+def batch_align_with_r(
+    pos_1:  torch.Tensor,
+    pos_2: torch.Tensor,
+    pos_mask: torch.Tensor,      
+)-> tuple[torch.Tensor, torch.Tensor]:
+    """(B,L,3),(B,L,3) Batch align pos_1 to pos_2, return aligned pos_1 and pos_2"""
+    x = torch.masked_select(pos_1, pos_mask.unsqueeze(-1)).reshape(pos_1.size(0), -1, 3)
+    y = torch.masked_select(pos_2, pos_mask.unsqueeze(-1)).reshape(pos_2.size(0), -1, 3)
+    xm = x.mean(dim=1, keepdim=True)
+    ym = y.mean(dim=1, keepdim=True)
+    x = x - xm
+    y = y - ym
+    s = x.transpose(-1, -2) @ y
+    u, sigma, vt = torch.linalg.svd(s)
+    r = vt.transpose(-1, -2) @ u.transpose(-1, -2)
+    t = ym - (r @ xm.transpose(-1, -2)).transpose(-1, -2)
+    pos_1_aligned = ((r@pos_1.reshape(pos_1.size(0), -1, 3).transpose(-1, -2)).transpose(-1, -2) + t).reshape(pos_1.size(0), pos_1.size(1), -1, 3)
+    
+    return pos_1_aligned, pos_2, r
+
+
 def batch_align(
     pos_1:  torch.Tensor,
     pos_2: torch.Tensor,
