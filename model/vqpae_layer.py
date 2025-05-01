@@ -229,7 +229,7 @@ class VQPAEBlock(nn.Module):
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
         
-        return mu, batch['generate_mask'], rigids
+        return mu, batch['generate_mask']
     
     def decoder_step(self, quantized, batch, mode):
         
