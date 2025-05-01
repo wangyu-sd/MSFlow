@@ -223,7 +223,7 @@ class VQPAE(nn.Module):
             "clash_loss": strc_loss['clash_loss'] * weigeht,
             "bb_angle_loss": strc_loss['bb_angle_loss'] * weigeht,
             "bb_torsion_loss": strc_loss['bb_torsion_loss'] * weigeht,
-            "global_rotmats_loss": global_rotmats_loss * weigeht,
+            # "global_rotmats_loss": global_rotmats_loss * weigeht,
         }
         
         for key in res.keys():
