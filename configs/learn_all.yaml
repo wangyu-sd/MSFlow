@@ -64,6 +64,7 @@ train:
     bb_angle_loss: 0.1
     bb_torsion_loss: 0.1
     div_loss: 0.1
+    global_rotmats_loss: 0.01
 
   max_iters: 400000000
   val_freq: 5000

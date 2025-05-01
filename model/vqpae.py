@@ -91,7 +91,7 @@ class VQPAE(nn.Module):
             "angles": angles_1, 
             "seqs": seqs_1, 
             "node_embed": node_embed, 
-            # "edge_embed": edge_embed,
+            "edge_embed": edge_embed,
             "generate_mask": gen_mask,
             "res_mask": res_mask,
         }
