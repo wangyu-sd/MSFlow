@@ -20,7 +20,7 @@ from model.models_con.node import NodeEmbedder
 # from model.modules.common.layers import sample_from, clampped_one_hot
 from model.vqpae_layer import VQPAEBlock
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
-from model.modules.common.geometry import construct_3d_basis, batch_align
+from model.modules.common.geometry import construct_3d_basis, batch_align_with_r
 from torch.nn.utils.rnn import pad_sequence
 from model.models_con import torus
 # from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
@@ -163,8 +163,8 @@ class VQPAE(nn.Module):
         pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_c, gen_mask)
         trans_gen = self.strc_loss_fn.extract_fea_from_gen(trans, gen_mask)
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
-        pred_trans_c, _, rot = batch_align(pred_trans_gen, trans_gen, gen_mask_sm.bool())
-        trans_loss = torch.sum((pred_trans_c - trans)**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
+        pred_trans_gen, _, rot = batch_align_with_r(pred_trans_gen, trans_gen, gen_mask_sm.bool())
+        trans_loss = torch.sum((pred_trans_gen - trans_gen)**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
         trans_loss = torch.mean(trans_loss)
         
         
@@ -172,13 +172,12 @@ class VQPAE(nn.Module):
         
         pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotamats, gen_mask)
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats_gen) 
-        pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot@pred_rotamats_gen) 
+        pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot.unsqueeze(dim=1)@pred_rotamats_gen) 
         rot_loss = torch.sum(((rotamats_vec - pred_rotmats_vec))**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
         rot_loss = torch.mean(rot_loss)
         
-        global_pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot)
-        global_rotmats_loss = torch.sum(((global_pred_rotmats_vec - 0.))**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8)
-        global_rotmats_loss = torch.mean(global_rotmats_loss)
+        global_pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot.unsqueeze(dim=1))
+        global_rotmats_loss = torch.mean(global_pred_rotmats_vec**2)
         
         
         # bb aux loss
