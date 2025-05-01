@@ -184,7 +184,7 @@ class VQPAE(nn.Module):
         
         # bb aux loss
         gt_bb_atoms = all_atom.to_atom37(trans_gen, rotamats_gen)[:, :, :3] 
-        pred_bb_atoms = all_atom.to_atom37(pred_trans_c, pred_rotmats)[:, :, :3]
+        pred_bb_atoms = all_atom.to_atom37(pred_trans_gen, pred_rotamats_gen)[:, :, :3]
         bb_atom_loss = torch.sum(
             (gt_bb_atoms - pred_bb_atoms) ** 2 * gen_mask_sm[..., None, None],
             dim=(-1, -2, -3)
