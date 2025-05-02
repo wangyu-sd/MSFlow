@@ -58,7 +58,7 @@ class VQPAEBlock(nn.Module):
         # 向量量化层
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s + 12,   
+            embedding_dim=self._ipa_conf.c_s + 3 + 3,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
@@ -190,11 +190,11 @@ class VQPAEBlock(nn.Module):
             value_list = [value[i][gen_mask[i]] for i in range(value.shape[0])]
             value_tensor = pad_sequence(value_list, batch_first=True, padding_value=0.)
             batch_gen[key] = value_tensor
-            
-        max_num_gen = gen_mask.sum(dim=1).max().item()
-        edge_mask_sm = batch_gen['generate_mask'][:, None] * batch_gen['generate_mask'][:, :, None]
-        batch_gen['edge_embed'] = torch.zeros(gen_mask.size(0), max_num_gen, max_num_gen,batch['edge_embed'].size(-1), device=gen_mask.device)
-        batch_gen['edge_embed'][edge_mask_sm.bool()] = batch['edge_embed'][edge_mask_gen]
+        if  "edge_embed" in batch.keys():
+            max_num_gen = gen_mask.sum(dim=1).max().item()
+            edge_mask_sm = batch_gen['generate_mask'][:, None] * batch_gen['generate_mask'][:, :, None]
+            batch_gen['edge_embed'] = torch.zeros(gen_mask.size(0), max_num_gen, max_num_gen,batch['edge_embed'].size(-1), device=gen_mask.device)
+            batch_gen['edge_embed'][edge_mask_sm.bool()] = batch['edge_embed'][edge_mask_gen]
         return batch_gen
     
     def encoder_step(self, batch, mode):
@@ -241,9 +241,9 @@ class VQPAEBlock(nn.Module):
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
         # str_vec = rigids.to_tensor_7()
-        # hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
-        # str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
-        str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
+        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
+        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
+        # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
         mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, batch['generate_mask']
@@ -270,9 +270,9 @@ class VQPAEBlock(nn.Module):
         
         curr_rigids = self.contex_filter(
             curr_rigids, poc_mask, res_mask, generate_mask, 
-            need_poc=need_poc, hidden_str=node_embed[..., -12:]
+            need_poc=need_poc, hidden_str=node_embed[..., -6:]
             )
-        node_embed = node_embed[..., :-12]
+        node_embed = node_embed[..., :-6]
         if need_poc:
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
@@ -289,6 +289,10 @@ class VQPAEBlock(nn.Module):
         pred_angles = pred_angles % (2*math.pi) 
         pred_trans = curr_rigids.get_trans()
         pred_rotmats = curr_rigids.get_rots().get_rot_mats()
+        gen_b = self.extrct_batch_gen({"ref":batch['rotmats'], "generate_mask":generate_mask, "pred_rotmats":pred_rotmats})
+        gen_b['pred_rotmats'] = gen_b[:, 0:1] @ pred_rotmats
+        pred_rotmats[generate_mask] = gen_b['pred_rotmats'][gen_b['generate_mask']]
+        
         
         # if mode == 'pep_given_poc':
         #     final_mask = generate_mask
@@ -478,8 +482,8 @@ class VQPAEBlock(nn.Module):
         trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
         
         if hidden_str is not None:
-            # rotmats = so3_utils.rotvec_to_rotmat(rot_vec.clone())
-            rotmats[gen_mask] =hidden_str[..., :-3].view(gen_mask.size(0), gen_mask.size(1), 3, 3)[gen_mask]
+            rotmats = so3_utils.rotvec_to_rotmat(hidden_str[..., :-3].clone())
+            # rotmats[gen_mask] =hidden_str[..., :-3].view(gen_mask.size(0), gen_mask.size(1), 3, 3)[gen_mask]
             trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
             # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
         

@@ -5,6 +5,8 @@ from torch.nn import functional as F
 from scipy.cluster.vq import kmeans2
 from typing import List
 import torch.distributed as dist
+from dm import so3_utils
+
 class ReparameterizedCodebook(nn.Module):
     def __init__(self, codebook_size=128, embedding_dim=512):
         super().__init__()
@@ -59,10 +61,14 @@ class VectorQuantizer(nn.Module):
     #     if 
         
     
-    def quantize_input(self, query, sampling=False):
+    def get_dist(self, query):
         d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
         d_no_grad.addmm_(query, self.embedding.data.T, alpha=-2, beta=1)
-        
+        return d_no_grad
+    
+    def quantize_input(self, query, sampling=False):
+        d_no_grad = self.get_dist(query[..., -12:])
+            
         if sampling:
             weight = F.softmax(-d_no_grad, dim=1)
             weight = weight / weight.sum(dim=1, keepdim=True)
