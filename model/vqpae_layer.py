@@ -58,7 +58,7 @@ class VQPAEBlock(nn.Module):
         # 向量量化层
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s + 7,   
+            embedding_dim=self._ipa_conf.c_s + 6,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
@@ -234,7 +234,8 @@ class VQPAEBlock(nn.Module):
         # logvar = self.var_prj(node_embed)
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
-        str_vec = rigids.to_tensor_7()
+        # str_vec = rigids.to_tensor_7()
+        str_vec = torch.cat([rigids.get_rots().get_rotvec(), rigids.get_trans()], dim=-1)
         mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, batch['generate_mask']
@@ -259,7 +260,10 @@ class VQPAEBlock(nn.Module):
         
         
         
-        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, generate_mask, need_poc=need_poc, hidden_str=node_embed[..., -7:])
+        curr_rigids = self.contex_filter(
+            curr_rigids, poc_mask, res_mask, generate_mask, 
+            need_poc=need_poc, hidden_str=node_embed[..., -6:]
+            )
         node_embed = node_embed[..., :-7]
         if need_poc:
             ## Fix the Pocket Features
@@ -340,7 +344,7 @@ class VQPAEBlock(nn.Module):
         Returns:
             _type_: _description_
         """
-        node_emb_raw = batch['node_embed']
+        # node_emb_raw = batch['node_embed']
         node_embed_sm, gen_mask_sm = self.encoder_step(batch, mode)
         quantized = self.before_quntized(node_embed_sm, gen_mask=gen_mask_sm) # TODO Add more choices for gen_mask
         
@@ -479,8 +483,8 @@ class VQPAEBlock(nn.Module):
             # hidden_str[:4] = torch.linalg.norm(hidden_str[:4], dim=-1, keepdim=True)
             
             # rigid = ru.Rigid.from_tensor_7(hidden_str)
-            rot = ru.quat_to_rot_with_grad(hidden_str[..., :4])
-            rotmats = torch.where(gen_mask.unsqueeze(-1).unsqueeze(-1),  rot, rotmats)
+            rot_vec = hidden_str[..., :3]
+            rotmats = ru.rot_vec_mul(rotmats, rot_vec)
             trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
             # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
         
