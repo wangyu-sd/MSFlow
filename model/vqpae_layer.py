@@ -266,6 +266,7 @@ class VQPAEBlock(nn.Module):
         
         curr_rigids = du.create_rigid(batch['rotmats'], batch['trans'])
         
+        generate_mask = generate_mask if need_poc else res_mask
         
         
         curr_rigids = self.contex_filter(
