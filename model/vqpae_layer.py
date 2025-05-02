@@ -210,8 +210,9 @@ class VQPAEBlock(nn.Module):
         x = node_embed
         
         rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
-        trans = (rotmats[:, 0:1].transpose(-1, -2) @ trans.transpose(-1, -2)).transpose(-1, -2)
+        trans = (rotmats[:, 0:1].transpose(-1, -2) @ trans)
         curr_rigids = du.create_rigid(rotmats, trans)
+        
 
         rigids : ru.Rigid = None
         node_embed, rigids, edge_embed = self._process_trunk(
@@ -338,7 +339,7 @@ class VQPAEBlock(nn.Module):
             _type_: _description_
         """
         node_emb_raw = batch['node_embed']
-        node_embed_sm, gen_mask_sm, rigids = self.encoder_step(batch, mode)
+        node_embed_sm, gen_mask_sm = self.encoder_step(batch, mode)
         quantized = self.before_quntized(node_embed_sm, gen_mask=gen_mask_sm) # TODO Add more choices for gen_mask
         
         quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized, sampling=sampling)
