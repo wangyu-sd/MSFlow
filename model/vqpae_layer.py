@@ -235,7 +235,8 @@ class VQPAEBlock(nn.Module):
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
         # str_vec = rigids.to_tensor_7()
-        str_vec = torch.cat([rigids.get_rots().get_rotvec(), rigids.get_trans()], dim=-1)
+        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
+        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
         mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, batch['generate_mask']
@@ -264,7 +265,7 @@ class VQPAEBlock(nn.Module):
             curr_rigids, poc_mask, res_mask, generate_mask, 
             need_poc=need_poc, hidden_str=node_embed[..., -6:]
             )
-        node_embed = node_embed[..., :-7]
+        node_embed = node_embed[..., :-6]
         if need_poc:
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
@@ -484,7 +485,7 @@ class VQPAEBlock(nn.Module):
             
             # rigid = ru.Rigid.from_tensor_7(hidden_str)
             rot_vec = hidden_str[..., :3]
-            rotmats = ru.rot_vec_mul(rotmats, rot_vec)
+            rotmats = so3_utils.rotvec_to_rotmat(rot_vec.clone())
             trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
             # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
         
