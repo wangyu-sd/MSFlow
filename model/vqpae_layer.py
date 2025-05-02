@@ -272,7 +272,7 @@ class VQPAEBlock(nn.Module):
             curr_rigids, poc_mask, res_mask, generate_mask, 
             need_poc=need_poc, hidden_str=node_embed[..., -12:]
             )
-        node_embed = node_embed[..., :-6]
+        node_embed = node_embed[..., :-12]
         if need_poc:
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
