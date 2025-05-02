@@ -479,7 +479,7 @@ class VQPAEBlock(nn.Module):
         
         if hidden_str is not None:
             # rotmats = so3_utils.rotvec_to_rotmat(rot_vec.clone())
-            rotmats[gen_mask] =hidden_str[..., :-3].veiw(-1, 3, 3)[gen_mask]
+            rotmats[gen_mask] =hidden_str[..., :-3].view(-1, 3, 3)[gen_mask]
             trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
             # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
         
