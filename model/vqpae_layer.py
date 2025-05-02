@@ -150,6 +150,12 @@ class VQPAEBlock(nn.Module):
                 node_embed = trunk[f'node_transition_{b}'](node_embed)
                 node_embed = node_embed * node_mask[..., None]
                 
+                # if trunk_type == 'decoder' and b:
+                #     poc_mask = torch.logical_and(node_mask, 1-gen_mask)
+                #     rigid_update_global = trunk[f'bb_update_g_{b}'](
+                #         node_embed * node_mask[..., None])
+                
+                
                 # if trunk_type == 'decoder' or b < num_blocks-1:
                 rigid_update = trunk[f'bb_update_{b}'](
                     node_embed * node_mask[..., None])
@@ -235,8 +241,9 @@ class VQPAEBlock(nn.Module):
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
         # str_vec = rigids.to_tensor_7()
-        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
-        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
+        # hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
+        # str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
+        str_vec = torch.cat([rigids.get_rots().get_rot_mats(), rigids.get_trans()], dim=-1)
         mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, batch['generate_mask']
@@ -263,7 +270,7 @@ class VQPAEBlock(nn.Module):
         
         curr_rigids = self.contex_filter(
             curr_rigids, poc_mask, res_mask, generate_mask, 
-            need_poc=need_poc, hidden_str=node_embed[..., -6:]
+            need_poc=need_poc, hidden_str=node_embed[..., -12:]
             )
         node_embed = node_embed[..., :-6]
         if need_poc:
@@ -470,22 +477,9 @@ class VQPAEBlock(nn.Module):
         rotmats = torch.eye(3, device=poc_mask.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
         trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
         
-        
-        
         if hidden_str is not None:
-            # torch.autograd.set_detect_anomaly(True)
-            # ridids = du.create_rigid(rotmats, trans)
-            # str_vec = self.decoder_init_rigid(hidden_str * gen_mask[..., None]) * gen_mask[..., None]
-            # ridids = ridids.compose_q_update_vec(str_vec, gen_mask[..., None])
-            # rotmats[gen_mask] = ridids.get_rots().get_rot_mats()[gen_mask]
-            # trans[gen_mask] = str_vec[gen_mask]
-            # rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
-            # trans[res_mask] = hidden_str[:, :, -3:][res_mask]
-            # hidden_str[:4] = torch.linalg.norm(hidden_str[:4], dim=-1, keepdim=True)
-            
-            # rigid = ru.Rigid.from_tensor_7(hidden_str)
-            rot_vec = hidden_str[..., :3]
-            rotmats = so3_utils.rotvec_to_rotmat(rot_vec.clone())
+            # rotmats = so3_utils.rotvec_to_rotmat(rot_vec.clone())
+            rotmats[gen_mask] =hidden_str[..., :-3].veiw(-1, 3, 3)[gen_mask]
             trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
             # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
         
