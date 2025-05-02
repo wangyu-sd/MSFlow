@@ -243,7 +243,7 @@ class VQPAEBlock(nn.Module):
         # str_vec = rigids.to_tensor_7()
         # hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
         # str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
-        str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(-1, 9), rigids.get_trans()], dim=-1)
+        str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
         mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, batch['generate_mask']
