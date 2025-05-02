@@ -74,7 +74,7 @@ class VectorQuantizer(nn.Module):
         return idx_N, h_NC, d_no_grad
 
         
-    def forward(self, f_BNC, col_samples=False, vae_stage=False, sampling=False):
+    def forward(self, f_BNC, col_samples=False, vae_stage=False, sampling=True):
         f_BCN = f_BNC.permute(0, 2, 1)
         B, C, N = f_BCN.shape
 

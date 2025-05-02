@@ -23,6 +23,7 @@ from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
 from model.modules.common.geometry import construct_3d_basis, batch_align_with_r
 from torch.nn.utils.rnn import pad_sequence
 from model.models_con import torus
+from openfold.utils import rigid_utils as ru
 # from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
 # from model.utils.misc import seed_all
 # from model.utils.train import sum_weighted_losses
@@ -64,7 +65,7 @@ class VQPAE(nn.Module):
         # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
     
     def extract_fea(self, batch):
-        rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])      
+        rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])  
         trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
         seqs_1 = batch['aa']
     
@@ -72,6 +73,12 @@ class VQPAE(nn.Module):
         # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         # structure_mask = context_mask 
         # sequence_mask = context_mask
+        poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
+        rotmats_avg = avg_rotation(rotmats_1, poc_mask)
+        rotmats_1 = rotmats_1.unsqueeze(1) @ rotmats_avg
+        trans_1, _ = self.zero_center_part(trans_1, res_mask, res_mask)
+        trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)
+        
         
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
                                         batch['mask_heavyatom'], structure_mask=batch['res_mask'], sequence_mask=batch['res_mask'])
@@ -83,7 +90,7 @@ class VQPAE(nn.Module):
         # node_embed = self.node_proj(node_embed) # (B,L,C)
         # edge_embed = self.edge_proj(edge_embed) # (B,L,C)
         gen_mask,res_mask, angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
-        trans_1, _ = self.zero_center_part(trans_1, gen_mask, res_mask)
+        
         
         batched_res = {
             "rotmats": rotmats_1,
@@ -169,7 +176,7 @@ class VQPAE(nn.Module):
         trans_loss = torch.mean(trans_loss)
         
         
-        strc_loss = self.strc_loss_fn(pred_trans_c, trans, gen_mask)
+        strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm)
         
         pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotamats, gen_mask)
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats_gen) 
@@ -281,6 +288,14 @@ def torsion_entropy(sin_cos_pred):
     
     return entropy
 
+
+
+def avg_rotation(R_avg_unc, poc_mask):
+        quat_avg = ru.rot_to_quat(R_avg_unc)
+        quat_avg = (quat_avg * poc_mask[..., None]).sum(dim=1)  / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)
+        quat_avg = quat_avg/(quat_avg.norm(dim=-1, keepdim=True)+1e-6)
+        R_avg = ru.quat_to_rot(quat_avg)
+        return R_avg # B,3,3
     
 
 class ProteinStructureLoss(nn.Module):

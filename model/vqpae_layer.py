@@ -12,6 +12,7 @@ from model.modules.common.layers import AngularEncoding
 from model.vq import VectorQuantizer
 from dm import so3_utils
 from torch.nn.utils.rnn import pad_sequence
+import openfold.utils.rigid_utils as ru
 
 
 
@@ -57,7 +58,7 @@ class VQPAEBlock(nn.Module):
         # 向量量化层
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s,   
+            embedding_dim=self._ipa_conf.c_s + 7,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
@@ -115,7 +116,7 @@ class VQPAEBlock(nn.Module):
         
         trunk[f'bb_update_{b}'] = ipa_pytorch.BackboneUpdate(
             self._ipa_conf.c_s, use_rot_updates=True)
-        # trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
+        trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
 
 
         # No edge update on the last block.
@@ -207,8 +208,12 @@ class VQPAEBlock(nn.Module):
 
         node_embed = batch['node_embed'] * node_mask[..., None]
         x = node_embed
-        curr_rigids = du.create_rigid(rotmats, trans)
         
+        rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
+        trans = (rotmats[:, 0:1].transpose(-1, -2) @ trans.transpose(-1, -2)).transpose(-1, -2)
+        curr_rigids = du.create_rigid(rotmats, trans)
+
+        rigids : ru.Rigid = None
         node_embed, rigids, edge_embed = self._process_trunk(
             'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=batch['generate_mask'])
         
@@ -228,6 +233,8 @@ class VQPAEBlock(nn.Module):
         # logvar = self.var_prj(node_embed)
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
+        str_vec = rigids.to_tensor_7()
+        mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, batch['generate_mask']
     
@@ -253,9 +260,9 @@ class VQPAEBlock(nn.Module):
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
         
-        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, generate_mask, need_poc=need_poc, hidden_str=node_embed)
+        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, generate_mask, need_poc=need_poc, hidden_str=node_embed[..., -7:])
         # node_embed = node_embed[..., :-6] * node_mask[..., None]
-        node_embed = node_embed * node_mask[..., None]
+        node_embed = node_embed[..., :-7] * node_mask[..., None]
         
         
         node_embed, _, curr_rigids = self._process_trunk(
@@ -331,7 +338,7 @@ class VQPAEBlock(nn.Module):
             _type_: _description_
         """
         node_emb_raw = batch['node_embed']
-        node_embed_sm, gen_mask_sm = self.encoder_step(batch, mode)
+        node_embed_sm, gen_mask_sm, rigids = self.encoder_step(batch, mode)
         quantized = self.before_quntized(node_embed_sm, gen_mask=gen_mask_sm) # TODO Add more choices for gen_mask
         
         quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized, sampling=sampling)
@@ -466,7 +473,9 @@ class VQPAEBlock(nn.Module):
             # trans[gen_mask] = str_vec[gen_mask]
             # rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
             # trans[res_mask] = hidden_str[:, :, -3:][res_mask]
-            pass
+            rigid = ru.Rigid.from_tensor_7(hidden_str)
+            rotmats[gen_mask] = rigid.get_rots().get_rot_mats()[gen_mask]
+            trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
         
         if need_poc:
             rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]
