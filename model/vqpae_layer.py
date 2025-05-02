@@ -199,7 +199,7 @@ class VQPAEBlock(nn.Module):
     
     def encoder_step(self, batch, mode):
         # batch_raw = batch
-        batch = self.extrct_batch_gen(batch)
+        # batch = self.extrct_batch_gen(batch)
         if mode == "poc_and_pep" or mode == "pep_given_poc" or mode=='codebook':
             node_mask = batch["res_mask"]
         elif mode == "poc_only":
@@ -215,8 +215,8 @@ class VQPAEBlock(nn.Module):
         node_embed = batch['node_embed'] * node_mask[..., None]
         x = node_embed
         
-        rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
-        trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
+        # rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
+        # trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
         curr_rigids = du.create_rigid(rotmats, trans)
         
 
@@ -289,9 +289,9 @@ class VQPAEBlock(nn.Module):
         pred_angles = pred_angles % (2*math.pi) 
         pred_trans = curr_rigids.get_trans()
         pred_rotmats = curr_rigids.get_rots().get_rot_mats()
-        gen_b = self.extrct_batch_gen({"ref":batch['rotmats'], "generate_mask":generate_mask, "pred_rotmats":pred_rotmats})
-        gen_b['pred_rotmats'] = gen_b['ref'][:, 0:1] @ gen_b['pred_rotmats']
-        pred_rotmats[generate_mask.bool()] = gen_b['pred_rotmats'][gen_b['generate_mask'].bool()]
+        # gen_b = self.extrct_batch_gen({"ref":batch['rotmats'], "generate_mask":generate_mask, "pred_rotmats":pred_rotmats})
+        # gen_b['pred_rotmats'] = gen_b['ref'][:, 0:1] @ gen_b['pred_rotmats']
+        # pred_rotmats[generate_mask.bool()] = gen_b['pred_rotmats'][gen_b['generate_mask'].bool()]
         
         
         # if mode == 'pep_given_poc':

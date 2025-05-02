@@ -156,7 +156,7 @@ class VQPAE(nn.Module):
             fea_dict['trans'], fea_dict['rotmats'], fea_dict['angles'], fea_dict['seqs']
         gen_mask, res_mask = fea_dict['generate_mask'], fea_dict['res_mask']
         
-        if mode == "codebook":
+        if mode == "codebook" or mode == 'pep_given_poc':
             gen_mask = res_mask
         elif mode == "poc":
             gen_mask = torch.logical_and(res_mask, 1-gen_mask)
@@ -252,14 +252,14 @@ class VQPAE(nn.Module):
         
         if mode == "codebook":
             # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
-            res = self.vqvae.forward_init(fea_dict, mode="pep_given_poc")
-            pep_loss = self.get_loss(res, fea_dict, mode='pep')
+            res = self.vqvae.forward_init(fea_dict, mode="pep_and_poc")
+            pep_loss = self.get_loss(res, fea_dict, mode='pep_and_poc')
         
         elif mode == "poc_and_pep":
-            pass
+            # pass
             # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
-            # res = self.vqvae(fea_dict, mode=mode)
-            # all_loss = self.get_loss(res, fea_dict)
+            res = self.vqvae(fea_dict, mode="poc_and_pep")
+            all_loss = self.get_loss(res, fea_dict, "poc_and_pep")
             
         # elif mode == "poc_or_pep":
         elif mode == "pep_given_poc":
