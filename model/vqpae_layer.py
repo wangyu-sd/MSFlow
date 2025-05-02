@@ -58,7 +58,7 @@ class VQPAEBlock(nn.Module):
         # 向量量化层
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s + 6,   
+            embedding_dim=self._ipa_conf.c_s + 12,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
