@@ -290,8 +290,8 @@ class VQPAEBlock(nn.Module):
         pred_trans = curr_rigids.get_trans()
         pred_rotmats = curr_rigids.get_rots().get_rot_mats()
         gen_b = self.extrct_batch_gen({"ref":batch['rotmats'], "generate_mask":generate_mask, "pred_rotmats":pred_rotmats})
-        gen_b['pred_rotmats'] = gen_b[:, 0:1] @ pred_rotmats
-        pred_rotmats[generate_mask] = gen_b['pred_rotmats'][gen_b['generate_mask']]
+        gen_b['pred_rotmats'] = gen_b['ref'][:, 0:1] @ gen_b['pred_rotmats']
+        pred_rotmats[generate_mask.bool()] = gen_b['pred_rotmats'][gen_b['generate_mask'].bool()]
         
         
         # if mode == 'pep_given_poc':

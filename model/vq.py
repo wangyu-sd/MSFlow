@@ -67,7 +67,7 @@ class VectorQuantizer(nn.Module):
         return d_no_grad
     
     def quantize_input(self, query, sampling=False):
-        d_no_grad = self.get_dist(query[..., -12:])
+        d_no_grad = self.get_dist(query)
             
         if sampling:
             weight = F.softmax(-d_no_grad, dim=1)
