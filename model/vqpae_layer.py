@@ -210,12 +210,12 @@ class VQPAEBlock(nn.Module):
         x = node_embed
         
         rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
-        trans = (rotmats[:, 0:1].transpose(-1, -2) @ trans)
+        trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
         curr_rigids = du.create_rigid(rotmats, trans)
         
 
         rigids : ru.Rigid = None
-        node_embed, rigids, edge_embed = self._process_trunk(
+        node_embed, edge_embed, rigids = self._process_trunk(
             'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=batch['generate_mask'])
         
         # rotmats = rigids.get_rots().get_rot_mats()
@@ -227,7 +227,7 @@ class VQPAEBlock(nn.Module):
         # rotmats = so3_utils.rotvec_to_rotmat(node_embed[..., -6:-3])
         # curr_rigids = du.create_rigid(rotmats, node_embed[..., -3:])
         
-        mu = self.mu_prj(node_embed + self.edge_to_node(batch['edge_embed']).mean(dim=-2))
+        mu = self.mu_prj(node_embed + self.edge_to_node(edge_embed).mean(dim=-2))
         mu = mu * node_mask[..., None]
         mu = x + mu
         
@@ -257,13 +257,15 @@ class VQPAEBlock(nn.Module):
         
         curr_rigids = du.create_rigid(batch['rotmats'], batch['trans'])
         
+        
+        
+        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, generate_mask, need_poc=need_poc, hidden_str=node_embed[..., -7:])
+        node_embed = node_embed[..., :-7]
         if need_poc:
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
-        
-        curr_rigids = self.contex_filter(curr_rigids, poc_mask, res_mask, generate_mask, need_poc=need_poc, hidden_str=node_embed[..., -7:])
         # node_embed = node_embed[..., :-6] * node_mask[..., None]
-        node_embed = node_embed[..., :-7] * node_mask[..., None]
+        
         
         
         node_embed, _, curr_rigids = self._process_trunk(
@@ -474,9 +476,13 @@ class VQPAEBlock(nn.Module):
             # trans[gen_mask] = str_vec[gen_mask]
             # rotmats[res_mask] = so3_utils.rotvec_to_rotmat(hidden_str[:, :, :-3][res_mask])
             # trans[res_mask] = hidden_str[:, :, -3:][res_mask]
-            rigid = ru.Rigid.from_tensor_7(hidden_str)
-            rotmats[gen_mask] = rigid.get_rots().get_rot_mats()[gen_mask]
-            trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
+            # hidden_str[:4] = torch.linalg.norm(hidden_str[:4], dim=-1, keepdim=True)
+            
+            # rigid = ru.Rigid.from_tensor_7(hidden_str)
+            rot = ru.quat_to_rot_with_grad(hidden_str[..., :4])
+            rotmats = torch.where(gen_mask.unsqueeze(-1).unsqueeze(-1),  rot, rotmats)
+            trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
+            # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
         
         if need_poc:
             rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]

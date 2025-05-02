@@ -191,6 +191,31 @@ def quat_to_rot(quat: torch.Tensor) -> torch.Tensor:
     return torch.sum(quat, dim=(-3, -4))
 
 
+def quat_to_rot_with_grad(quat: torch.Tensor) -> torch.Tensor:
+    """
+    Converts a quaternion to a rotation matrix.
+
+    Args:
+        quat: [*, 4] quaternions
+    Returns:
+        [*, 3, 3] rotation matrices
+    """
+    # [*, 4, 4]
+    quat = quat.clone()
+    # quat.requires_grad = True
+    quat = quat[..., None] * quat[..., None, :]
+
+    # [4, 4, 3, 3]
+    mat = quat.new_tensor(_QTR_MAT, requires_grad=False).clone()
+
+    # [*, 4, 4, 3, 3]
+    shaped_qtr_mat = mat.view((1,) * len(quat.shape[:-2]) + mat.shape)
+    quat = quat[..., None, None] * shaped_qtr_mat
+
+    # [*, 3, 3]
+    return torch.sum(quat, dim=(-3, -4))
+
+
 def rot_to_quat(
     rot: torch.Tensor,
 ):
