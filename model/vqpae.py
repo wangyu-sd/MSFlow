@@ -73,11 +73,11 @@ class VQPAE(nn.Module):
         # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         # structure_mask = context_mask 
         # sequence_mask = context_mask
-        poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
-        rotmats_avg = avg_rotation(rotmats_1, poc_mask)
-        rotmats_1 = rotmats_1.unsqueeze(1) @ rotmats_avg
-        trans_1, _ = self.zero_center_part(trans_1, res_mask, res_mask)
-        trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)
+        # poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
+        # rotmats_avg = avg_rotation(rotmats_1, poc_mask)
+        # rotmats_1 = rotmats_1.unsqueeze(1) @ rotmats_avg
+        # trans_1, _ = self.zero_center_part(trans_1, res_mask, res_mask)
+        # trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)
         
         
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
