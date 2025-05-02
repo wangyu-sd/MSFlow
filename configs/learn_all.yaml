@@ -75,7 +75,7 @@ train:
   max_grad_norm: 100.0
   optimizer:
     type: adamw
-    lr: 1.e-4 #1.e-4
+    lr: 1.e-5 #1.e-4
     weight_decay: 1.e-12
     beta1: 0.9
     beta2: 0.999

@@ -37,8 +37,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
-    # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-bfae6e9]_2025_04_28__03_26_39/checkpoints/50002_coodbook.pt")
-    parser.add_argument('--from_pretrain', type=str, default=None)
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-6da7735]_2025_05_02__13_13_37/checkpoints/34155_last.pt")
+    # parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
     args = parser.parse_args()
@@ -255,7 +255,7 @@ if __name__ == '__main__':
                     break
                     
             else:
-                train(it, mode='pep_given_poc')
+                train(it, mode='pep_and_poc')
                     
                     
             # if it % config.train.val_freq == 0:
