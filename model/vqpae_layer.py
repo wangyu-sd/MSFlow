@@ -216,7 +216,7 @@ class VQPAEBlock(nn.Module):
         else:
             raise ValueError(f"Invalid mode: {mode}")
         
-        
+        gen_mask = batch['generate_mask'] if mode == "pep_given_poc" else node_mask
         rotmats = batch['rotmats'] * node_mask[..., None, None]
         trans = batch['trans'] * node_mask[..., None]
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
@@ -231,7 +231,7 @@ class VQPAEBlock(nn.Module):
 
         rigids : ru.Rigid = None
         node_embed, edge_embed, rigids = self._process_trunk(
-            'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=batch['generate_mask'])
+            'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=gen_mask)
         
         # rotmats = rigids.get_rots().get_rot_mats()
         # trans = rigids.get_trans()
@@ -257,7 +257,7 @@ class VQPAEBlock(nn.Module):
         angles = batch["angles"] * node_mask[..., None]
         mu = torch.cat([mu, str_vec, self.angles_embedder(angles).reshape(num_batch,num_res,-1)], dim=-1)
         
-        return mu, batch['generate_mask']
+        return mu, gen_mask
     
     def decoder_step(self, quantized, batch, mode):
         
@@ -272,8 +272,11 @@ class VQPAEBlock(nn.Module):
         need_poc = mode == "pep_given_poc"
         poc_mask = torch.logical_and(node_mask, 1-generate_mask)
         
-        edge_mask_poc = poc_mask[:, None] * poc_mask[:, :, None]
-        edge_embed = edge_embed * edge_mask_poc[..., None]
+        if mode == "pep_given_poc":
+            edge_mask_poc = poc_mask[:, None] * poc_mask[:, :, None]
+            edge_embed = edge_embed * edge_mask_poc[..., None]
+        else:
+            edge_embed = torch.zeros_like(edge_embed)
         
         curr_rigids = du.create_rigid(batch['rotmats'], batch['trans'])
         
@@ -367,7 +370,7 @@ class VQPAEBlock(nn.Module):
         return node_embed
     
         
-    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=False):
+    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=True):
         """
             batch contains: rotmats, trans, angles, seqs, node_embed, 
                 edge_embed, generate_mask, res_mask
@@ -380,7 +383,7 @@ class VQPAEBlock(nn.Module):
         
         quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized, sampling=sampling)
         
-        quantized = self.after_quntized(quantized, gen_mask=batch['generate_mask'])
+        quantized = self.after_quntized(quantized, gen_mask=gen_mask_sm)
         
         res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
         res['commitment_loss'] = commitment_loss

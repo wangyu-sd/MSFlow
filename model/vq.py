@@ -50,7 +50,7 @@ class VectorQuantizer(nn.Module):
         self.collect_desired_size = collect_desired_size
         self.use_prob = True
         self.register_buffer("collected_samples", collected_samples)
-        self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
+        self.register_buffer('batch_counts', torch.zeros(codebook_size, dtype=torch.long))
         self.low_usage_threshold = 1.e-4
         # self.register_buffer('step', torch.zeros((1,), dtype=torch.long).squeeze())
         
@@ -61,15 +61,15 @@ class VectorQuantizer(nn.Module):
     
     def reset_counts(self):
         self.cluster_reset()
-        self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
+        self.batch_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
         
         # k = kmeans2(self.embedding.weight.data.cpu().numpy(), self.codebook_size, minit='++')[0]
         # self.embedding.weight.data = torch.from_numpy(k).to(self.embedding.weight.device)
         
     def _get_low_usage_indices(self):
         # 计算每个code的使用概率
-        usage_prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
-        return torch.where(usage_prob <= 1e-4)[0]
+        # usage_prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
+        return torch.where(self.batch_counts < 0)[0]
         
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
