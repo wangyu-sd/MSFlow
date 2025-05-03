@@ -51,7 +51,7 @@ class VectorQuantizer(nn.Module):
         self.use_prob = True
         self.register_buffer("collected_samples", collected_samples)
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
-        self.low_usage_threshold = 1.e-3
+        self.low_usage_threshold = 1.e-4
         # self.register_buffer('step', torch.zeros((1,), dtype=torch.long).squeeze())
         
         self.rot_idx = rot_idx
@@ -68,8 +68,8 @@ class VectorQuantizer(nn.Module):
         
     def _get_low_usage_indices(self):
         # 计算每个code的使用概率
-        # usage_prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
-        return torch.where(self.usage_counts.float() <= 1.)[0]
+        usage_prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
+        return torch.where(usage_prob <= 1e-4)[0]
         
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
@@ -174,14 +174,13 @@ class VectorQuantizer(nn.Module):
     
     
     def cluster_reset(self):
-        print('Performing selective fcluster initialization...')
         device = self.embedding.device
         
         # 获取低利用率code索引
         low_usage_idx = self._get_low_usage_indices().cpu().numpy()
         if len(low_usage_idx) == 0:
             return
-        
+        print(f'Performing selective kmeans++ initialization... for low usage codes:{len(low_usage_idx)}')
         # 分离高/低利用率code
         # preserved_codes = np.delete(self.coodbook_generator.base.data.cpu().numpy(), low_usage_idx, axis=0)
         samples = self.collected_samples.detach().cpu().numpy()
