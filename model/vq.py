@@ -92,8 +92,8 @@ class VectorQuantizer(nn.Module):
         d_no_grad = d_no_grad_fea + d_no_grad_rot + d_no_grad_trans + d_no_grad_angle
             
         if sampling:
-            weight = F.softmax(-d_no_grad, dim=1)
-            weight = weight / weight.sum(dim=1, keepdim=True)
+            # weight = F.softmax(-d_no_grad, dim=1)
+            weight = 1 / (d_no_grad + 1e-6)
             idx_N = torch.multinomial(weight, 1).squeeze(1)
         else:
             idx_N = torch.argmin(d_no_grad, dim=1)
