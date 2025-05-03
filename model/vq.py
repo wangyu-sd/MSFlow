@@ -7,6 +7,8 @@ from typing import List
 import torch.distributed as dist
 from dm import so3_utils
 import numpy as np
+from scipy.cluster.hierarchy import fclusterdata
+
 class ReparameterizedCodebook(nn.Module):
     def __init__(self, codebook_size=128, embedding_dim=512):
         super().__init__()
@@ -26,7 +28,8 @@ class ReparameterizedCodebook(nn.Module):
     def forward(self):
         return self.proj(self.base)  # 动态生成codebook向量
 class VectorQuantizer(nn.Module):
-    def __init__(self, codebook_size, embedding_dim, commitment_cost, init_steps, collect_desired_size, scales):
+    def __init__(self, codebook_size, embedding_dim, commitment_cost, init_steps, 
+                 collect_desired_size, scales, rot_idx, trans_idx, angle_idx):
         super().__init__()
 
         self.codebook_size = codebook_size
@@ -50,10 +53,14 @@ class VectorQuantizer(nn.Module):
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
         self.low_usage_threshold = 1.e-3
         # self.register_buffer('step', torch.zeros((1,), dtype=torch.long).squeeze())
+        
+        self.rot_idx = rot_idx
+        self.trans_idx = trans_idx
+        self.angle_idx = angle_idx
     
     
     def reset_counts(self):
-        self.kmeans_reset()
+        self.cluster_reset()
         self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
         
         # k = kmeans2(self.embedding.weight.data.cpu().numpy(), self.codebook_size, minit='++')[0]
@@ -77,11 +84,12 @@ class VectorQuantizer(nn.Module):
         return d_no_grad
     
     def quantize_input(self, query, sampling=False):
-        d_no_grad_fea = self.get_dist(query[:, :-6], self.embedding.data[:, :-6])
-        d_no_grad_rot = self.get_dist(query[:, -6:-3], self.embedding.data[:, -6:-3])
-        d_no_grad_trans = self.get_dist(query[:, -3:], self.embedding.data[:, -3:])
+        d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], self.embedding.data[:, :self.rot_idx])
+        d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], self.embedding.data[:, self.rot_idx:self.trans_idx])
+        d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], self.embedding.data[:, self.trans_idx:self.angle_idx])
+        d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], self.embedding.data[:, self.angle_idx:])
         
-        d_no_grad = d_no_grad_fea + d_no_grad_rot + d_no_grad_trans
+        d_no_grad = d_no_grad_fea + d_no_grad_rot + d_no_grad_trans + d_no_grad_angle
             
         if sampling:
             weight = F.softmax(-d_no_grad, dim=1)
@@ -165,7 +173,7 @@ class VectorQuantizer(nn.Module):
             self.collected_samples = torch.zeros(0, self.embedding_dim, device=self.collected_samples.device)
     
     
-    def kmeans_reset(self):
+    def cluster_reset(self):
         print('Performing selective K++ initialization...')
         device = self.embedding.device
         
@@ -179,23 +187,30 @@ class VectorQuantizer(nn.Module):
         samples = self.collected_samples.detach().cpu().numpy()
         
         
-        def dist(u, v):
-            dist1 = (u[:, :-6] - v[:, :-6]) ** 2
-            dist2 = (u[:, -6:-3] - v[:, -6:-3]) ** 2
-            dist3 = (u[:, -3:] - v[:, -3:]) ** 2
-            return dist1 + dist2 + dist3
+        def pep_dist(u, v):
+            split_shape =  [self.rot_idx, self.trans_idx, self.angle_idx, self.embedding_dim]
+            dist = 0.
+            start_idx = 0
+            for idx in split_shape:
+                dist_ = np.sum((u[start_idx:idx] - v[start_idx:idx])**2,)
+                dist = dist + dist_
+                start_idx = idx
+            return np.sqrt(dist)
         
-        # 对低利用率code进行K-means++初始化
-        num_replace = len(low_usage_idx)
-        new_centroids, _ = kmeans2(
-            samples, 
-            num_replace, 
-            minit='++', 
-            metric=dist,
+        # 对低利用率code进fcluster初始化
+        new_centroids = fclusterdata(
+        samples,
+        t=len(low_usage_idx),  # 目标簇数
+        metric=pep_dist,
+        method='centroid'
         )
+        unique_labels = np.unique(new_centroids)
+        cluster_centers = np.array([samples[new_centroids == label].mean(axis=0) 
+                                for label in unique_labels])
+
         
         # 更新embedding矩阵
-        self.coodbook_generator.base.data[low_usage_idx] = torch.from_numpy(new_centroids).to(device)
+        self.coodbook_generator.base.data[low_usage_idx] = torch.from_numpy(cluster_centers).to(device)
         print(f'Reinitialized {len(low_usage_idx)} low-usage codes')
         self.collect_samples = torch.zeros(0, self.embedding_dim, device=self.collected_samples.device)
     

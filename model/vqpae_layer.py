@@ -37,14 +37,18 @@ class VQPAEBlock(nn.Module):
         )
         
         # self.str_fea_fusion = FeaFusionLayer(ipa_conf)s
-        
+        angle_dim = self.angles_embedder.get_out_dim(in_dim=5)
         self.res_feat_mixer = nn.Sequential(
-            nn.Linear(2 * self._ipa_conf.c_s + self.angles_embedder.get_out_dim(in_dim=5), self._ipa_conf.c_s),
+            nn.Linear(2 * self._ipa_conf.c_s + angle_dim, self._ipa_conf.c_s),
             nn.GELU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
         self.feat_dim = self._ipa_conf.c_s
-        self.angle_res = nn.Linear(self._ipa_conf.c_s, 5)
+        self.angle_fuese_net = nn.Sequential(
+            nn.Linear(angle_dim, self._ipa_conf.c_s),nn.GELU(),
+            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
+        )
+        self.angle_res = nn.Linear(angle_dim, 5)
 
         # 主干拆分
         self.encoder_trunk = nn.ModuleDict()
@@ -57,7 +61,7 @@ class VQPAEBlock(nn.Module):
             self._build_block(b, is_encoder=True)
             
         # 向量量化层
-        angle_dim = self.angles_embedder.get_out_dim(in_dim=5)
+        
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
             embedding_dim=self._ipa_conf.c_s + 3 + 3 + angle_dim,   
@@ -65,6 +69,9 @@ class VQPAEBlock(nn.Module):
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
             scales=ipa_conf.scales,
+            rot_idx=self._ipa_conf.c_s,
+            trans_idx=self._ipa_conf.c_s + 3,
+            angle_idx=self._ipa_conf.c_s + 3 + 3,
         )
         
         # 解码器主干构建
@@ -272,14 +279,15 @@ class VQPAEBlock(nn.Module):
         
         generate_mask = generate_mask if need_poc else res_mask
         
+        node_embed = node_embed[..., self._ipa_conf.c_s:]
+        str_fea = node_embed[..., self._ipa_conf.c_s:self._ipa_conf.c_s+6]
+        angle_fea = node_embed[..., -self.angle_dim:]
+        
         
         curr_rigids = self.contex_filter(
             curr_rigids, poc_mask, res_mask, generate_mask, 
-            need_poc=need_poc, hidden_str=node_embed[..., -6-self.angle_dim:self.angle_dim]
+            need_poc=need_poc, hidden_str=str_fea,
             )
-        
-        node_embed = node_embed[..., :-6-self.angle_dim]
-        angle_fea = node_embed[..., -self.angle_dim:]
         
         if need_poc:
             ## Fix the Pocket Features
@@ -287,7 +295,7 @@ class VQPAEBlock(nn.Module):
         # node_embed = node_embed[..., :-6] * node_mask[..., None]
         
         
-        
+        node_embed = node_embed + self.angle_fuese_net(angle_fea)
         node_embed, _, curr_rigids = self._process_trunk(
             'decoder', node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask=generate_mask)
         
