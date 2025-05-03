@@ -69,15 +69,17 @@ class VectorQuantizer(nn.Module):
     #     if 
         
     
-    def get_dist(self, query):
-        d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(self.embedding.data.square(), dim=1, keepdim=False)
-        d_no_grad.addmm_(query, self.embedding.data.T, alpha=-2, beta=1)
+    def get_dist(self, query, embedding=None):
+        if embedding is None:
+            embedding = self.embedding.data
+        d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(embedding.square(), dim=1, keepdim=False)
+        d_no_grad.addmm_(query, embedding.T, alpha=-2, beta=1)
         return d_no_grad
     
     def quantize_input(self, query, sampling=False):
-        d_no_grad_fea = self.get_dist(query[:, :-6])
-        d_no_grad_rot = self.get_dist(query[:, -6:-3])
-        d_no_grad_trans = self.get_dist(query[:, -3:])
+        d_no_grad_fea = self.get_dist(query[:, :-6], self.embedding.data[:, :-6])
+        d_no_grad_rot = self.get_dist(query[:, -6:-3], self.embedding.data[:, -6:-3])
+        d_no_grad_trans = self.get_dist(query[:, -3:], self.embedding.data[:, -3:])
         
         d_no_grad = d_no_grad_fea + d_no_grad_rot + d_no_grad_trans
             
