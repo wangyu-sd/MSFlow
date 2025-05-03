@@ -6,7 +6,7 @@ from scipy.cluster.vq import kmeans2
 from typing import List
 import torch.distributed as dist
 from dm import so3_utils
-
+import numpy as np
 class ReparameterizedCodebook(nn.Module):
     def __init__(self, codebook_size=128, embedding_dim=512):
         super().__init__()
@@ -48,13 +48,21 @@ class VectorQuantizer(nn.Module):
         self.use_prob = True
         self.register_buffer("collected_samples", collected_samples)
         self.register_buffer('usage_counts', torch.zeros(codebook_size, dtype=torch.long))
+        self.low_usage_threshold = 1.e-3
         # self.register_buffer('step', torch.zeros((1,), dtype=torch.long).squeeze())
     
     
     def reset_counts(self):
+        self.kmeans_reset()
         self.usage_counts = torch.zeros(self.codebook_size, dtype=torch.long, device=self.embedding.device)
+        
         # k = kmeans2(self.embedding.weight.data.cpu().numpy(), self.codebook_size, minit='++')[0]
         # self.embedding.weight.data = torch.from_numpy(k).to(self.embedding.weight.device)
+        
+    def _get_low_usage_indices(self):
+        # 计算每个code的使用概率
+        usage_prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
+        return torch.where(usage_prob < self.low_usage_threshold)[0]
         
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
@@ -88,6 +96,7 @@ class VectorQuantizer(nn.Module):
         f_rest = f_no_grad.clone()
         f_hat  = torch.zeros_like(f_rest)
         
+        
         if not vae_stage:
             self.update_embedding()
             # self.step
@@ -99,8 +108,12 @@ class VectorQuantizer(nn.Module):
             for si, pn in enumerate(self.scales):
                 rest_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
 
-                if self.collect_phase and col_samples:
+                if self.collected_samples.shape[0] < self.collect_desired_size:
                     self.collected_samples = torch.cat((self.collected_samples, rest_NC), dim=0)
+                else:
+                    random_idx = torch.randint(0, 2, (self.collect_desired_size,), device=rest_NC.device).bool()
+                    self.collected_samples = self.collect_samples[random_idx]
+                    self.collect_samples = torch.cat((self.collected_samples, rest_NC[random_idx]), dim=0)
                 
                 if vae_stage:
                     h_BCn = F.interpolate(rest_NC.reshape(B, -1, C).permute(0, 2, 1), size=(N), mode='linear').contiguous()
@@ -147,6 +160,34 @@ class VectorQuantizer(nn.Module):
             self.collect_phase = False
             self.kmeans_init()
             self.collected_samples = torch.zeros(0, self.embedding_dim, device=self.collected_samples.device)
+    
+    
+    def kmeans_reset(self):
+        print('Performing selective K++ initialization...')
+        device = self.embedding.device
+        
+        # 获取低利用率code索引
+        low_usage_idx = self._get_low_usage_indices().cpu().numpy()
+        if len(low_usage_idx) == 0:
+            return
+        
+        # 分离高/低利用率code
+        preserved_codes = np.delete(self.coodbook_generator.base.weight.data.cpu().numpy(), low_usage_idx, axis=0)
+        samples = self.collected_samples.cpu().numpy()
+        
+        # 对低利用率code进行K-means++初始化
+        num_replace = len(low_usage_idx)
+        new_centroids, _ = kmeans2(
+            samples, 
+            num_replace, 
+            minit='++', 
+            init=preserved_codes if len(preserved_codes)>0 else '++'
+        )
+        
+        # 更新embedding矩阵
+        self.coodbook_generator.base.weight.data[low_usage_idx] = torch.from_numpy(new_centroids).to(device)
+        print(f'Reinitialized {len(low_usage_idx)} low-usage codes')
+    
     
     def kmeans_init(self):
         print('K++ means Codebook initialisation starting...')
