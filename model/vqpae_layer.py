@@ -254,7 +254,7 @@ class VQPAEBlock(nn.Module):
         
         # rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
         # trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
-        trans, rotmats = self.rigid_to_se3invarint(rigid=rigids, gen_mask=gen_mask)
+        trans, rotmats = self.rigid_to_se3invarint(trans=trans, rotmats=rotmats, gen_mask=gen_mask)
         curr_rigids = du.create_rigid(rotmats, trans)
         
 
