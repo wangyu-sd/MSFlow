@@ -138,7 +138,7 @@ class VectorQuantizer(nn.Module):
                     
                     h_BCn = F.interpolate(h_BnC.permute(0, 2, 1), size=(N), mode='linear').contiguous()
                     batch_counts = torch.bincount(idx_Bn.flatten(), minlength=self.codebook_size)
-                    self.batch_counts = self.usage_counts + batch_counts
+                    self.batch_counts = self.batch_counts + batch_counts
                     # h_BCn, _ = self.get_softvq(rest_NC, B, pn, C, N)
 
                 f_hat = f_hat + h_BCn
