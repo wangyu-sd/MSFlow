@@ -222,7 +222,7 @@ class VQPAEBlock(nn.Module):
         # rot_anchor = batch_gen['rotmats'][:, 0]
         # trans_anchor = batch_gen['trans'][:, 0]
         rot_clean = batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ batch_gen['rotmats']
-        trans_clean = (batch_gen['rotmats'][:, 0:1].mT @ batch_gen['trans'].unsqueeze(-1)).squeeze(-1)
+        trans_clean = (batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ batch_gen['trans'].unsqueeze(-1)).squeeze(-1)
 
         # (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
 
@@ -280,7 +280,7 @@ class VQPAEBlock(nn.Module):
         # str_vec = rigids.to_tensor_7()
         trans, rotmats = self.rigid_to_se3invarint(rigid=rigids, gen_mask=gen_mask)
         hidden_rotm = so3_utils.rotmat_to_rotvec(rotmats)
-        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
+        str_vec = torch.cat([hidden_rotm, trans], dim=-1)
         
         # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
         num_batch, num_res = batch["seqs"].shape
@@ -400,7 +400,7 @@ class VQPAEBlock(nn.Module):
         return node_embed
     
         
-    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=True):
+    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=False):
         """
             batch contains: rotmats, trans, angles, seqs, node_embed, 
                 edge_embed, generate_mask, res_mask
