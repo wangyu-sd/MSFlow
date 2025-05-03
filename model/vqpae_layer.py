@@ -44,6 +44,7 @@ class VQPAEBlock(nn.Module):
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
         self.feat_dim = self._ipa_conf.c_s
+        self.angle_res = nn.Linear(self._ipa_conf.c_s, 5)
 
         # 主干拆分
         self.encoder_trunk = nn.ModuleDict()
@@ -56,9 +57,10 @@ class VQPAEBlock(nn.Module):
             self._build_block(b, is_encoder=True)
             
         # 向量量化层
+        angle_dim = self.angles_embedder.get_out_dim(in_dim=5)
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s + 3 + 3,   
+            embedding_dim=self._ipa_conf.c_s + 3 + 3 + angle_dim,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
@@ -244,7 +246,9 @@ class VQPAEBlock(nn.Module):
         hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
         str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
         # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
-        mu = torch.cat([mu, str_vec], dim=-1)
+        num_batch, num_res = batch["seqs"].shape
+        angles = batch["angles"] * node_mask[..., None]
+        mu = torch.cat([mu, str_vec, self.angles_embedder(angles).reshape(num_batch,num_res,-1)], dim=-1)
         
         return mu, batch['generate_mask']
     
@@ -271,9 +275,12 @@ class VQPAEBlock(nn.Module):
         
         curr_rigids = self.contex_filter(
             curr_rigids, poc_mask, res_mask, generate_mask, 
-            need_poc=need_poc, hidden_str=node_embed[..., -6:]
+            need_poc=need_poc, hidden_str=node_embed[..., -6-self.angle_dim:self.angle_dim]
             )
-        node_embed = node_embed[..., :-6]
+        
+        node_embed = node_embed[..., :-6-self.angle_dim]
+        angle_fea = node_embed[..., -self.angle_dim:]
+        
         if need_poc:
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
@@ -286,7 +293,7 @@ class VQPAEBlock(nn.Module):
         
         # 输出预测
         pred_seqs = self.seq_net(node_embed)
-        pred_angles = self.angle_net(node_embed)
+        pred_angles = self.angle_net(node_embed) + self.angle_res(angle_fea)
         pred_angles = pred_angles % (2*math.pi) 
         pred_trans = curr_rigids.get_trans()
         pred_rotmats = curr_rigids.get_rots().get_rot_mats()
