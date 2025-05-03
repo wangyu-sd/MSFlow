@@ -182,10 +182,15 @@ if __name__ == '__main__':
         if not args.debug:
             to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
             log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger, to_log=to_log)
-            if it % (len_train_dataset // config.train.batch_size * 10) == 0 or it ==100:
-                coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+        elif it == 100:
+            model.vqvae.quantizer.kmeans_reset()
+        if it % (len_train_dataset // config.train.batch_size * 10) == 0:
+            coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+            if not args.debug:
                 plot_codebook_dist(coodbook_cnt, log_dir, it)
-                model.vqvae.quantizer.reset_counts()
+            model.vqvae.quantizer.reset_counts()
+        elif it % (len_train_dataset // config.train.batch_size) == 0:
+            model.vqvae.quantizer.kmeans_reset()
             
 
     def validate(it, mode):

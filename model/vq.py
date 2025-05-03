@@ -109,11 +109,8 @@ class VectorQuantizer(nn.Module):
                 rest_NC = F.interpolate(f_rest, size=(pn), mode='area').permute(0, 2, 1).reshape(-1, C)
 
                 if self.collected_samples.shape[0] < self.collect_desired_size:
-                    self.collected_samples = torch.cat((self.collected_samples, rest_NC), dim=0)
-                else:
-                    random_idx = torch.randint(0, 2, (self.collect_desired_size,), device=rest_NC.device).bool()
-                    self.collected_samples = self.collect_samples[random_idx]
-                    self.collect_samples = torch.cat((self.collected_samples, rest_NC[random_idx]), dim=0)
+                    random_idx = torch.rand(rest_NC.shape[0], device=rest_NC.device) < 0.2
+                    self.collected_samples = torch.cat((self.collected_samples, rest_NC[random_idx]), dim=0)
                 
                 if vae_stage:
                     h_BCn = F.interpolate(rest_NC.reshape(B, -1, C).permute(0, 2, 1), size=(N), mode='linear').contiguous()
@@ -172,8 +169,8 @@ class VectorQuantizer(nn.Module):
             return
         
         # 分离高/低利用率code
-        preserved_codes = np.delete(self.coodbook_generator.base.weight.data.cpu().numpy(), low_usage_idx, axis=0)
-        samples = self.collected_samples.cpu().numpy()
+        preserved_codes = np.delete(self.coodbook_generator.base.data.cpu().numpy(), low_usage_idx, axis=0)
+        samples = self.collected_samples.detach().cpu().numpy()
         
         # 对低利用率code进行K-means++初始化
         num_replace = len(low_usage_idx)
@@ -181,12 +178,12 @@ class VectorQuantizer(nn.Module):
             samples, 
             num_replace, 
             minit='++', 
-            init=preserved_codes if len(preserved_codes)>0 else '++'
         )
         
         # 更新embedding矩阵
-        self.coodbook_generator.base.weight.data[low_usage_idx] = torch.from_numpy(new_centroids).to(device)
+        self.coodbook_generator.base.data[low_usage_idx] = torch.from_numpy(new_centroids).to(device)
         print(f'Reinitialized {len(low_usage_idx)} low-usage codes')
+        self.collect_samples = torch.zeros(0, self.embedding_dim, device=self.collected_samples.device)
     
     
     def kmeans_init(self):
