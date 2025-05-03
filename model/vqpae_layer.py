@@ -206,9 +206,37 @@ class VQPAEBlock(nn.Module):
             batch_gen['edge_embed'][edge_mask_sm.bool()] = batch['edge_embed'][edge_mask_gen]
         return batch_gen
     
+    
+    def rigid_to_se3invarint(self,rigid=None, gen_mask=None, trans=None, rotmats=None):
+        if rigid is not None:
+            trans = rigid.get_trans()
+            rotmats = rigid.get_rots().get_rot_mats()
+        
+        batch_gen = self.extrct_batch_gen({
+            "trans": trans, "rotmats": rotmats, "generate_mask": gen_mask,
+        })
+        # rot_clean = batch_gen['rotmats'][:, :-1].transpose(-1, -2) @ batch_gen['rotmats'][:, 1:]
+        # trans_clean = batch_gen['trans'][:, :-1] - batch_gen['trans'][:, 1:]
+        
+        
+        # rot_anchor = batch_gen['rotmats'][:, 0]
+        # trans_anchor = batch_gen['trans'][:, 0]
+        rot_clean = batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ batch_gen['rotmats']
+        trans_clean = (batch_gen['rotmats'][:, 0:1].mT @ batch_gen['trans'].unsqueeze(-1)).squeeze(-1)
+
+        # (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
+
+        # batch_gen['rotmats'][:, 0] =  rot_anchor.transpose(-1, -2) @ rot_anchor
+        # batch_gen['trans'][:, 0] = trans_anchor - trans_anchor
+        
+        trans[gen_mask.bool()] = trans_clean[batch_gen['generate_mask'].bool()]
+        rotmats[gen_mask.bool()] = rot_clean[batch_gen['generate_mask'].bool()]
+        
+        return trans, rotmats
+    
     def encoder_step(self, batch, mode):
-        # batch_raw = batch
-        # batch = self.extrct_batch_gen(batch)
+        batch_raw = batch
+        batch = self.extrct_batch_gen(batch)
         if mode == "poc_and_pep" or mode == "pep_given_poc" or mode=='codebook':
             node_mask = batch["res_mask"]
         elif mode == "poc_only":
@@ -250,8 +278,10 @@ class VQPAEBlock(nn.Module):
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
         # str_vec = rigids.to_tensor_7()
-        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
+        trans, rotmats = self.rigid_to_se3invarint(rigid=rigids, gen_mask=gen_mask)
+        hidden_rotm = so3_utils.rotmat_to_rotvec(rotmats)
         str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
+        
         # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
         num_batch, num_res = batch["seqs"].shape
         angles = batch["angles"] * node_mask[..., None]
@@ -383,7 +413,7 @@ class VQPAEBlock(nn.Module):
         
         quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized, sampling=sampling)
         
-        quantized = self.after_quntized(quantized, gen_mask=gen_mask_sm)
+        quantized = self.after_quntized(quantized, gen_mask=batch['generate_mask'])
         
         res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
         res['commitment_loss'] = commitment_loss
