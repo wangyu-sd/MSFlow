@@ -175,7 +175,7 @@ if __name__ == '__main__':
         # scalar_dict.update(metric_dict['scalar'])
         u_count = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
         u_prob = u_count / u_count.sum()
-        u_rate = (u_prob >= 1 / config.model.encoder.codebook_size / 10).sum() / u_count.shape[0]
+        u_rate = (u_prob >= 1 / config.model.encoder.ipa.codebook_size / 10).sum() / u_count.shape[0]
         scalar_dict.update({
             'grad': orig_grad_norm,
             'coodbook_usage_rate': float(u_rate),
