@@ -49,7 +49,7 @@ class VQPAEBlock(nn.Module):
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
         )
         self.angle_res = nn.Linear(angle_dim, 5)
-
+        self.angle_dim = angle_dim
         # 主干拆分
         self.encoder_trunk = nn.ModuleDict()
         self.decoder_trunk = nn.ModuleDict()
@@ -279,9 +279,11 @@ class VQPAEBlock(nn.Module):
         
         generate_mask = generate_mask if need_poc else res_mask
         
-        node_embed = node_embed[..., self._ipa_conf.c_s:]
+        fea = node_embed[..., :self._ipa_conf.c_s]
         str_fea = node_embed[..., self._ipa_conf.c_s:self._ipa_conf.c_s+6]
         angle_fea = node_embed[..., -self.angle_dim:]
+        
+        node_embed = fea
         
         
         curr_rigids = self.contex_filter(

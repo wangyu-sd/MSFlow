@@ -7,7 +7,7 @@ from typing import List
 import torch.distributed as dist
 from dm import so3_utils
 import numpy as np
-from scipy.cluster.hierarchy import fclusterdata
+from scipy.cluster.vq import kmeans2
 
 class ReparameterizedCodebook(nn.Module):
     def __init__(self, codebook_size=128, embedding_dim=512):
@@ -81,7 +81,7 @@ class VectorQuantizer(nn.Module):
             embedding = self.embedding.data
         d_no_grad = torch.sum(query.square(), dim=1, keepdim=True) + torch.sum(embedding.square(), dim=1, keepdim=False)
         d_no_grad.addmm_(query, embedding.T, alpha=-2, beta=1)
-        return d_no_grad
+        return (d_no_grad / query.size(-1))
     
     def quantize_input(self, query, sampling=False):
         d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], self.embedding.data[:, :self.rot_idx])
@@ -174,7 +174,7 @@ class VectorQuantizer(nn.Module):
     
     
     def cluster_reset(self):
-        print('Performing selective K++ initialization...')
+        print('Performing selective fcluster initialization...')
         device = self.embedding.device
         
         # 获取低利用率code索引
@@ -183,34 +183,32 @@ class VectorQuantizer(nn.Module):
             return
         
         # 分离高/低利用率code
-        preserved_codes = np.delete(self.coodbook_generator.base.data.cpu().numpy(), low_usage_idx, axis=0)
+        # preserved_codes = np.delete(self.coodbook_generator.base.data.cpu().numpy(), low_usage_idx, axis=0)
         samples = self.collected_samples.detach().cpu().numpy()
         
+        # split features
+        split_shape =  [self.rot_idx, self.trans_idx, self.angle_idx, self.embedding_dim]
+        start_idx = 0
+        for end_idx in split_shape:
+            samples[:, start_idx:end_idx] = samples[:, start_idx:end_idx] / math.sqrt(end_idx - start_idx)
+            start_idx = end_idx
         
-        def pep_dist(u, v):
-            split_shape =  [self.rot_idx, self.trans_idx, self.angle_idx, self.embedding_dim]
-            dist = 0.
-            start_idx = 0
-            for idx in split_shape:
-                dist_ = np.sum((u[start_idx:idx] - v[start_idx:idx])**2,)
-                dist = dist + dist_
-                start_idx = idx
-            return np.sqrt(dist)
-        
-        # 对低利用率code进fcluster初始化
-        new_centroids = fclusterdata(
-        samples,
-        t=len(low_usage_idx),  # 目标簇数
-        metric=pep_dist,
-        method='centroid'
+        num_replace = len(low_usage_idx)
+        # 计算低利用率code的均值
+        new_centroids, _ = kmeans2(
+            samples, 
+            num_replace, 
+            minit='++', 
         )
-        unique_labels = np.unique(new_centroids)
-        cluster_centers = np.array([samples[new_centroids == label].mean(axis=0) 
-                                for label in unique_labels])
 
+        # Recover the original scale
+        start_idx = 0
+        for end_idx in split_shape:
+            new_centroids[:, start_idx:end_idx] = new_centroids[:, start_idx:end_idx] * math.sqrt(end_idx - start_idx)
+            start_idx = end_idx
         
         # 更新embedding矩阵
-        self.coodbook_generator.base.data[low_usage_idx] = torch.from_numpy(cluster_centers).to(device)
+        self.coodbook_generator.base.data[low_usage_idx] = torch.from_numpy(new_centroids).to(device)
         print(f'Reinitialized {len(low_usage_idx)} low-usage codes')
         self.collect_samples = torch.zeros(0, self.embedding_dim, device=self.collected_samples.device)
     
