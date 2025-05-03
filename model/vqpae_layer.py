@@ -254,6 +254,7 @@ class VQPAEBlock(nn.Module):
         
         # rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
         # trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
+        trans, rotmats = self.rigid_to_se3invarint(rigid=rigids, gen_mask=gen_mask)
         curr_rigids = du.create_rigid(rotmats, trans)
         
 
@@ -278,7 +279,7 @@ class VQPAEBlock(nn.Module):
         # logvar = logvar * node_mask[..., None]
         # logvar = x + logvar
         # str_vec = rigids.to_tensor_7()
-        trans, rotmats = self.rigid_to_se3invarint(rigid=rigids, gen_mask=gen_mask)
+        
         hidden_rotm = so3_utils.rotmat_to_rotvec(rotmats)
         str_vec = torch.cat([hidden_rotm, trans], dim=-1)
         
