@@ -176,12 +176,20 @@ class VectorQuantizer(nn.Module):
         preserved_codes = np.delete(self.coodbook_generator.base.data.cpu().numpy(), low_usage_idx, axis=0)
         samples = self.collected_samples.detach().cpu().numpy()
         
+        
+        def dist(u, v):
+            dist1 = (u[:, :-6] - v[:, :-6]) ** 2
+            dist2 = (u[:, -6:-3] - v[:, -6:-3]) ** 2
+            dist3 = (u[:, -3:] - v[:, -3:]) ** 2
+            return dist1 + dist2 + dist3
+        
         # 对低利用率code进行K-means++初始化
         num_replace = len(low_usage_idx)
         new_centroids, _ = kmeans2(
             samples, 
             num_replace, 
             minit='++', 
+            metric=dist,
         )
         
         # 更新embedding矩阵
