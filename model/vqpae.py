@@ -183,7 +183,7 @@ class VQPAE(nn.Module):
         strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm)
         
         # cleanning rotamats
-        global_rot = rotamats_gen[:, 0]
+        global_rot = rotamats_gen[:, 0].clone()
         rotamats_gen = rotamats_gen[:, 0:1].transpose(-1, -2) @ rotamats_gen
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats_gen) 
         # pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot.unsqueeze(dim=1)@pred_rotamats_gen) 
