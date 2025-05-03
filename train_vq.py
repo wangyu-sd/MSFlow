@@ -174,7 +174,8 @@ if __name__ == '__main__':
         scalar_dict = {}
         # scalar_dict.update(metric_dict['scalar'])
         u_count = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
-        u_rate = (u_count >= 1.).sum() / u_count.shape[0]
+        u_prob = u_count / u_count.sum()
+        u_rate = (u_prob >= 1 / config.model.encoder.codebook_size / 10).sum() / u_count.shape[0]
         scalar_dict.update({
             'grad': orig_grad_norm,
             'coodbook_usage_rate': float(u_rate),
@@ -192,8 +193,8 @@ if __name__ == '__main__':
             if not args.debug:
                 plot_codebook_dist(coodbook_cnt, log_dir, it)
             model.vqvae.quantizer.reset_counts()
-        elif it % (len_train_dataset // config.train.batch_size * 2) == 0:
-            model.vqvae.quantizer.cluster_reset()
+        elif it % (len_train_dataset // config.train.batch_size) == 0:
+            model.vqvae.quantizer.reset_counts()
             
 
     def validate(it, mode):
