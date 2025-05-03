@@ -61,8 +61,8 @@ class VectorQuantizer(nn.Module):
         
     def _get_low_usage_indices(self):
         # 计算每个code的使用概率
-        usage_prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
-        return torch.where(usage_prob < self.low_usage_threshold)[0]
+        # usage_prob = self.usage_counts.float() / (self.usage_counts.sum() + 1e-6)
+        return torch.where(self.usage_counts.float() <= 1.)[0]
         
     def update_embedding(self):
         self.embedding = self.coodbook_generator()
