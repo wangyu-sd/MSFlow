@@ -173,8 +173,11 @@ if __name__ == '__main__':
         # Logging
         scalar_dict = {}
         # scalar_dict.update(metric_dict['scalar'])
+        u_count = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+        u_rate = (u_count >= 1.).sum() / u_count.shape[0]
         scalar_dict.update({
             'grad': orig_grad_norm,
+            'coodbook_usage_rate': float(u_rate),
             'lr': optimizer.param_groups[0]['lr'],
             'time_forward': (time_forward_end - time_start) / 1000,
             'time_backward': (time_backward_end - time_forward_end) / 1000,
