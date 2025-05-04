@@ -491,6 +491,16 @@ class VQPAEBlock(nn.Module):
         quantized = self.after_quntized(f_hat, gen_mask=batch['generate_mask'])    
         res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
 
+        batch_gen = self.extrct_batch_gen({
+            'rotmats': batch['rotmats'], 
+            'generate_mask': batch['generate_mask'],
+            'pred_rotmats': res['pred_rotmats'],
+            'pred_trans': res['pred_trans']})
+        batch_gen['pred_rotmats'] = batch_gen['rotmats'][:, 0:1] @ batch_gen['pred_rotmats']
+        batch_gen['trans'] = (batch_gen['rotmats'][:, 0:1] @ batch_gen['trans'].unsqueeze(-1)).squeeze(-1)
+        res['pred_rotmats'][batch['generate_mask'].bool()] = batch_gen['pred_rotmats'][batch_gen['generate_mask'].bool()]
+        res['pred_trans'][batch['generate_mask'].bool()] = batch_gen['pred_rotmats'][batch_gen['generate_mask'].bool()]
+        
         return res
 
 
