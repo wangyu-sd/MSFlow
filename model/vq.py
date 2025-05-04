@@ -87,7 +87,7 @@ class VectorQuantizer(nn.Module):
         p = 0.
         for x in x_list: 
             if return_dist:
-                x = x.sum(dim=1) / x
+                x = x.sum(dim=1, keepdim=True) / x
             p = p + x
         return p
     
