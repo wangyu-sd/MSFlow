@@ -45,7 +45,7 @@ class PAR(nn.Module):
         
         # Class embedding
         init_std = math.sqrt(1 / self.C / 3)
-        self.poc_emb = nn.Linear(self.Cvae, self.C)
+        self.poc_emb = nn.Linear(self.vqpae._model_cfg.node_embed_size, self.C)
         self.pos_start = nn.Parameter(torch.empty(1, self.first_l, self.C))
         nn.init.trunc_normal_(self.pos_start.data, mean=0, std=init_std)
         

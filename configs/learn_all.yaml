@@ -24,7 +24,7 @@ model:
 par:
   depth: 6
   num_heads: 8
-  emb_dim: 128
+  emb_dim: 512
   mlp_ratio: 2
 
   # interpolant:
