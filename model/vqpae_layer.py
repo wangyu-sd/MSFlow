@@ -401,7 +401,7 @@ class VQPAEBlock(nn.Module):
         return node_embed + batch['node_embed']
     
         
-    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=True):
+    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=False):
         """
             batch contains: rotmats, trans, angles, seqs, node_embed, 
                 edge_embed, generate_mask, res_mask
