@@ -119,10 +119,10 @@ class VectorQuantizer(nn.Module):
         return idx_N, h_NC, d_no_grad
     
     def get_mse_loss(self, x, y):
-        loss_fea = F.mse_loss(x[:, :self.rot_idx], y[:, :self.rot_idx]).mean(dim=1)
-        loss_rot = F.mse_loss(x[:, self.rot_idx:self.trans_idx], y[:, self.rot_idx:self.trans_idx]).mean(dim=1)
-        loss_trans = F.mse_loss(x[:, self.trans_idx:self.angle_idx], y[:, self.trans_idx:self.angle_idx]).mean(dim=1)
-        loss_angle = F.mse_loss(x[:, self.angle_idx:], y[:, self.angle_idx:]).mean(dim=1)
+        loss_fea = F.mse_loss(x[:, :self.rot_idx], y[:, :self.rot_idx])
+        loss_rot = F.mse_loss(x[:, self.rot_idx:self.trans_idx], y[:, self.rot_idx:self.trans_idx])
+        loss_trans = F.mse_loss(x[:, self.trans_idx:self.angle_idx], y[:, self.trans_idx:self.angle_idx])
+        loss_angle = F.mse_loss(x[:, self.angle_idx:], y[:, self.angle_idx:])
         
         loss_all = loss_fea + loss_rot + loss_trans + loss_angle
         
