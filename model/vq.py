@@ -91,13 +91,13 @@ class VectorQuantizer(nn.Module):
             p = p + x
         return p
     
-    def get_dist_all(self, query, key, retrun_dist=False):
+    def get_dist_all(self, query, key, return_dist=False):
         d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], key[:, :self.rot_idx])
         d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], key[:, self.rot_idx:self.trans_idx])
         d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], key[:, self.trans_idx:self.angle_idx])
         d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], key[:, self.angle_idx:])
         
-        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans, d_no_grad_angle], retrun_dist)
+        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans, d_no_grad_angle], return_dist=return_dist)
         
         return d_no_grad
     
