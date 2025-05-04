@@ -107,10 +107,10 @@ class VectorQuantizer(nn.Module):
         if sampling:
             # weight = F.softmax(-d_no_grad, dim=1)
             # weight = 1 / (d_no_grad + 1e-6)
-            d_no_grad = self.get_dist(query, key=self.embedding.data, return_dist=True)
+            d_no_grad = self.get_dist_all(query, key=self.embedding.data, return_dist=True)
             idx_N = torch.multinomial(d_no_grad, 1).squeeze(1)
         else:
-            d_no_grad = self.get_dist(query, key=self.embedding.data)
+            d_no_grad = self.get_dist_all(query, key=self.embedding.data)
             idx_N = torch.argmin(d_no_grad, dim=1)
         h_NC = self.embedding[idx_N]
         
