@@ -160,6 +160,7 @@ if __name__ == '__main__':
     logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
     ckpt = torch.load(args.from_pretrain, map_location=args.device, weights_only=True)
     model_vq = VQPAE(ckpt['config'].model).to(args.device)  
+    ckpt['model']['vqvae.quantizer.collected_samples'] = model_vq.vqvae.quantizer.collected_samples
     model_vq.load_state_dict(ckpt['model'])
     logger.info('Done!')
     
