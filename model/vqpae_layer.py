@@ -280,8 +280,8 @@ class VQPAEBlock(nn.Module):
         # logvar = x + logvar
         # str_vec = rigids.to_tensor_7()
         
-        hidden_rotm = so3_utils.rotmat_to_rotvec(rotmats)
-        str_vec = torch.cat([hidden_rotm, trans], dim=-1)
+        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
+        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
         
         # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
         num_batch, num_res = batch["seqs"].shape
@@ -398,7 +398,7 @@ class VQPAEBlock(nn.Module):
         #     node_mask,
         #     batch['generate_mask'],
         #     )
-        return node_embed
+        return node_embed + batch['node_embed']
     
         
     def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=True):

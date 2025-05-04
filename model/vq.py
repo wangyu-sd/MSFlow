@@ -83,13 +83,19 @@ class VectorQuantizer(nn.Module):
         d_no_grad.addmm_(query, embedding.T, alpha=-2, beta=1)
         return (d_no_grad / query.size(-1))
     
+    def weighted_sum(self, x_list:List[torch.Tensor], weight:torch.Tensor=None):
+        d = 0.
+        for x in x_list:
+            d = d + x / x.sum(dim=0)
+        return d
+    
     def quantize_input(self, query, sampling=False):
         d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], self.embedding.data[:, :self.rot_idx])
         d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], self.embedding.data[:, self.rot_idx:self.trans_idx])
         d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], self.embedding.data[:, self.trans_idx:self.angle_idx])
         d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], self.embedding.data[:, self.angle_idx:])
         
-        d_no_grad = d_no_grad_fea + d_no_grad_rot + d_no_grad_trans + d_no_grad_angle
+        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans, d_no_grad_angle])
             
         if sampling:
             weight = F.softmax(-d_no_grad, dim=1)

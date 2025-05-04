@@ -194,7 +194,7 @@ class VQPAE(nn.Module):
         global_rot_vec = so3_utils.rotmat_to_rotvec(global_rot)
         global_rot_vec_pred = so3_utils.rotmat_to_rotvec(res['pred_rotmats'])
         poc_mask = torch.logical_and(res_mask, 1-gen_mask)
-        global_rot_vec_pred = (global_rot_vec_pred * poc_mask[...,None]).sum(dim=1) / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)[..., None]
+        global_rot_vec_pred = (global_rot_vec_pred * poc_mask[...,None]).sum(dim=1) / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)
         global_rot_loss = (global_rot_vec - global_rot_vec_pred).pow(2).sum(dim=-1)
         global_rot_loss = global_rot_loss.mean()
         
