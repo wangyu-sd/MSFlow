@@ -204,11 +204,11 @@ class VectorQuantizer(nn.Module):
         device = self.embedding.device
         
         # 获取低利用率code索引
-        print(f'Performing selective kmeans++ initialization... for low usage codes:{len(low_usage_idx)}')
+        print(f'Performing selective kmeans++ initialization...')
         low_usage_idx = self._get_low_usage_indices().cpu().numpy()
         if len(low_usage_idx) == 0:
             return
-        
+        print(f"Find usage codes:{len(low_usage_idx)}')")
         # 分离高/低利用率code
         # preserved_codes = np.delete(self.coodbook_generator.base.data.cpu().numpy(), low_usage_idx, axis=0)
         samples = self.collected_samples.detach().cpu().numpy()
