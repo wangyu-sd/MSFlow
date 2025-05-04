@@ -83,25 +83,34 @@ class VectorQuantizer(nn.Module):
         d_no_grad.addmm_(query, embedding.T, alpha=-2, beta=1)
         return (d_no_grad / query.size(-1))
     
-    def weighted_sum(self, x_list:List[torch.Tensor], weight:torch.Tensor=None):
-        d = 0.
-        for x in x_list:
-            d = d + x / x.sum(dim=0)
-        return d
+    def weighted_sum(self, x_list:List[torch.Tensor], weight:torch.Tensor=None, return_dist=False):
+        p = 0.
+        for x in x_list: 
+            if return_dist:
+                x = x.sum(dim=1) / x
+            p = p + x
+        return p
+    
+    def get_dist_all(self, query, key, retrun_dist=False):
+        d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], key[:, :self.rot_idx])
+        d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], key[:, self.rot_idx:self.trans_idx])
+        d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], key[:, self.trans_idx:self.angle_idx])
+        d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], key[:, self.angle_idx:])
+        
+        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans, d_no_grad_angle], retrun_dist)
+        
+        return d_no_grad
     
     def quantize_input(self, query, sampling=False):
-        d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], self.embedding.data[:, :self.rot_idx])
-        d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], self.embedding.data[:, self.rot_idx:self.trans_idx])
-        d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], self.embedding.data[:, self.trans_idx:self.angle_idx])
-        d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], self.embedding.data[:, self.angle_idx:])
         
-        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans, d_no_grad_angle])
             
         if sampling:
-            weight = F.softmax(-d_no_grad, dim=1)
+            # weight = F.softmax(-d_no_grad, dim=1)
             # weight = 1 / (d_no_grad + 1e-6)
-            idx_N = torch.multinomial(weight, 1).squeeze(1)
+            d_no_grad = self.get_dist(query, key=self.embedding.data, return_dist=True)
+            idx_N = torch.multinomial(d_no_grad, 1).squeeze(1)
         else:
+            d_no_grad = self.get_dist(query, key=self.embedding.data)
             idx_N = torch.argmin(d_no_grad, dim=1)
         h_NC = self.embedding[idx_N]
         
@@ -150,8 +159,8 @@ class VectorQuantizer(nn.Module):
                 f_hat = f_hat + h_BCn
                 f_rest -= h_BCn
 
-                mean_commitment_loss += F.mse_loss(f_hat.data, f_BCN).mul_(0.25)
-                mean_q_latent_loss += F.mse_loss(f_hat, f_no_grad)
+                mean_commitment_loss += self.get_dist_all(f_hat.data, f_BCN).mul_(0.25)
+                mean_q_latent_loss += self.get_dist_all(f_hat, f_no_grad)
             
             mean_commitment_loss *= 1. / SN
             mean_q_latent_loss *= 1. / SN
