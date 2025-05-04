@@ -172,7 +172,7 @@ class VQPAE(nn.Module):
         pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotamats, gen_mask)
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
         
-        trans_gen =  (rotamats_gen[:, 0:1].mT @ trans_gen.unsqueeze(-1)).squeeze(-1)
+        trans_gen =  (rotamats_gen[:, 0:1].transpose(-1, -2) @ trans_gen.unsqueeze(-1)).squeeze(-1)
         
         
         # pred_trans_gen, _, rot = batch_align_with_r(pred_trans_gen, trans_gen, gen_mask_sm.bool())
