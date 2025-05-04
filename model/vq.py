@@ -88,6 +88,8 @@ class VectorQuantizer(nn.Module):
         for x in x_list: 
             if return_dist:
                 x = x.sum(dim=1, keepdim=True) / x
+            else:
+                x = x / x.sum(dim=1, keepdim=True)
             p = p + x
         return p
     
@@ -115,6 +117,16 @@ class VectorQuantizer(nn.Module):
         h_NC = self.embedding[idx_N]
         
         return idx_N, h_NC, d_no_grad
+    
+    def get_mse_loss(self, x, y):
+        loss_fea = F.mse_loss(x[:, :self.rot_idx], y[:, :self.rot_idx]).mean(dim=1)
+        loss_rot = F.mse_loss(x[:, self.rot_idx:self.trans_idx], y[:, self.rot_idx:self.trans_idx]).mean(dim=1)
+        loss_trans = F.mse_loss(x[:, self.trans_idx:self.angle_idx], y[:, self.trans_idx:self.angle_idx]).mean(dim=1)
+        loss_angle = F.mse_loss(x[:, self.angle_idx:], y[:, self.angle_idx:]).mean(dim=1)
+        
+        loss_all = loss_fea + loss_rot + loss_trans + loss_angle
+        
+        return loss_all
 
         
     def forward(self, f_BNC, col_samples=False, vae_stage=False, sampling=True):
@@ -159,8 +171,8 @@ class VectorQuantizer(nn.Module):
                 f_hat = f_hat + h_BCn
                 f_rest -= h_BCn
 
-                mean_commitment_loss += self.get_dist_all(f_hat.data, f_BCN).mul_(0.25)
-                mean_q_latent_loss += self.get_dist_all(f_hat, f_no_grad)
+                mean_commitment_loss += self.get_mse_loss(f_hat.data, f_BCN).mul_(0.25)
+                mean_q_latent_loss += self.get_mse_loss(f_hat, f_no_grad)
             
             mean_commitment_loss *= 1. / SN
             mean_q_latent_loss *= 1. / SN
