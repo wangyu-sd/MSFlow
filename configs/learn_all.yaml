@@ -69,7 +69,7 @@ train:
   max_iters: 400000000
   val_freq: 5000
   batch_size: 10
-  batch_size_pr: 100
+  batch_size_pr: 64
   accum_grad: 1
   seed: 114514
   max_grad_norm: 100.0
