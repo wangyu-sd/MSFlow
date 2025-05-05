@@ -99,10 +99,10 @@ class AdaLNCrossAttn(nn.Module):
             cond_BD: 条件向量 [B, D]
             attn_bias: 注意力偏置 [B, H, L, L_c]
         """
-        # 分解条件参数[7](@ref)
+        # 分解条件参数
         gamma1, gamma2, scale1, scale2, shift1, shift2 = (
-            self.ada_gss + cond_BD.unsqueeze(1)  # [B,1,D] + [1,1,6,C] → [B,1,6,C]
-        ).unbind(2)  # 每个参数形状 [B,1,C]
+            self.ada_gss + cond_BD  # [B,1,D] + [1,1,6,C] → [B,1,6,C]
+        ).unbind(2)
         
         # 条件归一化处理
         norm_x = self.ln_wo_grad(x)
