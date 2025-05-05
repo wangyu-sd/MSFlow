@@ -188,9 +188,9 @@ class VQPAEBlock(nn.Module):
         return node_embed, edge_embed, curr_rigids
         
         
-    def extrct_batch_gen(self, batch):
+    def extrct_batch_gen(self, batch, gen_mask=None):
         batch_gen = {}
-        gen_mask = batch['generate_mask']
+        if gen_mask is None : gen_mask = batch['generate_mask']
         edge_mask_gen = gen_mask[:, None] * gen_mask[:, :, None]
         gen_mask, edge_mask_gen = gen_mask.bool(), edge_mask_gen.bool()
         for key, value in batch.items():
@@ -236,10 +236,10 @@ class VQPAEBlock(nn.Module):
     
     def encoder_step(self, batch, mode):
         batch_raw = batch
-        batch = self.extrct_batch_gen(batch)
         if mode == "poc_and_pep" or mode == "pep_given_poc" or mode=='codebook':
+            batch = self.extrct_batch_gen(batch)
             node_mask = batch["res_mask"]
-        elif mode == "poc_only":
+        elif mode == "poc":
             node_mask = torch.logical_and(batch["res_mask"], 1-batch["generate_mask"])
         else:
             raise ValueError(f"Invalid mode: {mode}")
@@ -480,9 +480,50 @@ class VQPAEBlock(nn.Module):
         return res
         
     
-    def graph_to_idxBl(self, batch, mode) -> List:
+    def pep_to_idxBl(self, batch, mode) -> List:
         node_embed, mask = self.encoder_step(batch, mode=mode)
         interpolated_nodes = self.before_quntized(node_embed, gen_mask=mask)
+
+        return self.quantizer.f_to_idxBl(interpolated_nodes)
+    
+    def poc_to_idxBl(self, batch) -> List:
+       
+        node_mask = torch.logical_and(batch["res_mask"], 1-batch["generate_mask"]).float()
+        
+        gen_mask =  node_mask
+        rotmats = batch['rotmats'] * node_mask[..., None, None]
+        trans = batch['trans'] * node_mask[..., None]
+        edge_mask = node_mask[:, None] * node_mask[:, :, None]
+
+        node_embed = batch['node_embed'] * node_mask[..., None]
+        x = node_embed
+        
+        # rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
+        # trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
+        
+        batch_gen = self.extrct_batch_gen(batch)
+        rotmats = batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ rotmats
+        trans = (batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @  trans.unsqueeze(-1)).squeeze(-1)
+    
+        curr_rigids = du.create_rigid(rotmats, trans)
+        
+        rigids : ru.Rigid = None
+        node_embed, edge_embed, rigids = self._process_trunk(
+            'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=gen_mask)
+        
+        
+        mu = self.mu_prj(node_embed + self.edge_to_node(edge_embed).mean(dim=-2))
+        mu = mu * node_mask[..., None]
+        mu = x + mu
+        
+        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
+        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
+        
+        num_batch, num_res = batch["seqs"].shape
+        angles = batch["angles"] * node_mask[..., None]
+        mu = torch.cat([mu, str_vec, self.angles_embedder(angles).reshape(num_batch,num_res,-1)], dim=-1)
+        
+        interpolated_nodes = self.before_quntized(mu, gen_mask=gen_mask)
 
         return self.quantizer.f_to_idxBl(interpolated_nodes)
     
@@ -497,9 +538,9 @@ class VQPAEBlock(nn.Module):
             'pred_rotmats': res['pred_rotmats'],
             'pred_trans': res['pred_trans']})
         batch_gen['pred_rotmats'] = batch_gen['rotmats'][:, 0:1] @ batch_gen['pred_rotmats']
-        batch_gen['trans'] = (batch_gen['rotmats'][:, 0:1] @ batch_gen['trans'].unsqueeze(-1)).squeeze(-1)
+        batch_gen['pred_trans'] = (batch_gen['rotmats'][:, 0:1] @ batch_gen['pred_trans'].unsqueeze(-1)).squeeze(-1)
         res['pred_rotmats'][batch['generate_mask'].bool()] = batch_gen['pred_rotmats'][batch_gen['generate_mask'].bool()]
-        res['pred_trans'][batch['generate_mask'].bool()] = batch_gen['pred_rotmats'][batch_gen['generate_mask'].bool()]
+        res['pred_trans'][batch['generate_mask'].bool()] = batch_gen['pred_trans'][batch_gen['generate_mask'].bool()]
         
         return res
 

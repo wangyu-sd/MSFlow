@@ -159,11 +159,11 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
     parser.add_argument('--logdir', type=str, default="/remote-home/wangyu/VQ-PAR/log_sample")
     parser.add_argument('--debug', action='store_true', default=False)
-    parser.add_argument('--device', type=str, default='cuda:1')
+    parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default="log_par/learn_all[main-87bad41]_2025_04_30__13_01_46/checkpoints/95000.pt")
-    parser.add_argument('--from_pretrain', type=str, default="logs/learn_all[main-36fe0f2]_2025_04_29__21_39_14/checkpoints/140000.pt")
+    parser.add_argument('--resume', type=str, default="log_par/learn_all[main-36612ab]_2025_05_05__00_56_53/checkpoints/5000.pt")
+    parser.add_argument('--from_pretrain', type=str, default="logs/learn_all[main-f067471]_2025_05_04__15_09_44/checkpoints/15000.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 
@@ -206,10 +206,12 @@ if __name__ == '__main__':
         # tensorboard_trace_handler = torch.profiler.tensorboard_trace_handler(log_dir)
         if not os.path.exists(os.path.join(log_dir, os.path.basename(args.config))):
             shutil.copyfile(args.config, os.path.join(log_dir, os.path.basename(args.config)))
+        print("Logdir: %s" % log_dir)
     logger.info(args)
     logger.info(config)
     config['from_pretrain'] = args.from_pretrain
     config['resume'] = args.resume
+    
 
     # Data
     logger.info('Loading datasets...')
@@ -219,9 +221,9 @@ if __name__ == '__main__':
                                             name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
     val_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size_pr, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
     train_iterator = inf_iterator(train_loader)
-    val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size_pr, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     logger.info('Train %d | Val %d' % (len(train_dataset), len(val_dataset)))
 
     # Model
@@ -231,6 +233,7 @@ if __name__ == '__main__':
     logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
     ckpt = torch.load(args.from_pretrain, map_location=args.device, weights_only=True)
     model_vq = VQPAE(ckpt['config'].model).to(args.device)  
+    ckpt['model']['vqvae.quantizer.collected_samples'] = model_vq.vqvae.quantizer.collected_samples
     model_vq.load_state_dict(ckpt['model'])
     logger.info('Done!')
     
@@ -271,9 +274,9 @@ if __name__ == '__main__':
         batch = recursive_to(batch, args.device)    
         
         for sp_idx in tqdm(range(args.sample_num), desc="Generating Multiple Samples", dynamic_ncols=True):
-            # final = model.autoregressive_infer_cfg(batch, cfg=0.0, top_k=5, top_p=0.0)
-            final = model.anchor_based_infer(batch, cfg=0.0, top_k=5, top_p=0.0)
-            pos_ha,_,_ = full_atom_reconstruction(R_bb=final['rotmats'],t_bb=final['trans'],angles=final['angles'],aa=final['seqs'])
+            final = model.autoregressive_infer_cfg(batch, cfg=0.0, top_k=5, top_p=0.0)
+            # final = model.anchor_based_infer(batch, cfg=0.0, top_k=5, top_p=0.0)
+            pos_ha,_,_ = full_atom_reconstruction(R_bb=final['rotmats_gt'],t_bb=final['trans_gt'],angles=final['angles_gt'],aa=final['seqs_gt'])
             pos_ha = F.pad(pos_ha, pad=(0,0,0,15-14), value=0.) # (B,L,A,3) pos14 A=14
             pos_new = torch.where(batch['generate_mask'][:,:,None,None],pos_ha,batch['pos_heavyatom'])
             mask_new = get_heavyatom_mask(final['seqs'])
