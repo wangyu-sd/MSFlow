@@ -173,7 +173,7 @@ class VQPAE(nn.Module):
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
         
         # Add global rotation ===========
-        # trans_gen =  (rotamats_gen[:, 0:1].transpose(-1, -2) @ trans_gen.unsqueeze(-1)).squeeze(-1)
+        trans_gen =  (rotamats_gen[:, 0:1].transpose(-1, -2) @ trans_gen.unsqueeze(-1)).squeeze(-1)
         # ===============================
         
         
@@ -185,8 +185,8 @@ class VQPAE(nn.Module):
         strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm)
         
         # cleanning rotamats =================
-        # global_rot = rotamats_gen[:, 0].clone()
-        # rotamats_gen = rotamats_gen[:, 0:1].transpose(-1, -2) @ rotamats_gen
+        global_rot = rotamats_gen[:, 0].clone()
+        rotamats_gen = rotamats_gen[:, 0:1].transpose(-1, -2) @ rotamats_gen
         # ====================================
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats_gen) 
         # pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot.unsqueeze(dim=1)@pred_rotamats_gen) 
@@ -195,15 +195,15 @@ class VQPAE(nn.Module):
         rot_loss = torch.mean(rot_loss)
         
         # Calculate Global Vec ==================================
-        # global_rot_vec = so3_utils.rotmat_to_rotvec(global_rot)
-        # global_rot_vec_pred = so3_utils.rotmat_to_rotvec(res['pred_rotmats'])
-        # poc_mask = torch.logical_and(res_mask, 1-gen_mask)
-        # global_rot_vec_pred = (global_rot_vec_pred * poc_mask[...,None]).sum(dim=1) / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)
-        # global_rot_loss = (global_rot_vec - global_rot_vec_pred).pow(2).sum(dim=-1)
-        # global_rot_loss = global_rot_loss.mean()
-        # ==========================================================
+        global_rot_vec = so3_utils.rotmat_to_rotvec(global_rot)
+        global_rot_vec_pred = so3_utils.rotmat_to_rotvec(res['pred_rotmats'])
+        poc_mask = torch.logical_and(res_mask, 1-gen_mask)
+        global_rot_vec_pred = (global_rot_vec_pred * poc_mask[...,None]).sum(dim=1) / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)
+        global_rot_loss = (global_rot_vec - global_rot_vec_pred).pow(2).sum(dim=-1)
+        global_rot_loss = global_rot_loss.mean()
         # global_rotmats_loss = torch.mean(global_pred_rotmats_vec**2)
-        global_rot_loss = 0.
+        # ==========================================================
+        # global_rot_loss = 0.
         
         # bb aux loss
         gt_bb_atoms = all_atom.to_atom37(trans_gen, rotamats_gen)[:, :, :3] 
