@@ -37,6 +37,15 @@ class CrossAttention(nn.Module):
         self.proj = nn.Linear(embed_dim, embed_dim)
         self.proj_drop = nn.Dropout(proj_drop, inplace=True)
         self.attn_drop = nn.Dropout(attn_drop, inplace=True) if attn_drop > 0 else nn.Identity()
+        self.caching = False
+        self.cached_k = None
+        self.cached_v = None
+    
+    def kv_caching(self, enable: bool):
+        self.caching = enable
+        if not enable:
+            self.cached_k = None
+            self.cached_v = None
 
     def forward(self, x, context, attn_bias=None):
         B, L, C = x.shape
@@ -52,6 +61,16 @@ class CrossAttention(nn.Module):
             scale_mul = self.scale_mul_1H11.clamp_max(self.max_scale_mul).exp()
             q = F.normalize(q, dim=-1).mul(scale_mul)
             k = F.normalize(k, dim=-1)
+            
+            
+        # KV缓存
+        # if self.caching:
+        #     if self.cached_k is None: 
+        #         self.cached_k = k
+        #         self.cached_v = v
+        #     else: 
+        #         k = self.cached_k = torch.cat((self.cached_k, k), dim=2)
+        #         v = self.cached_v = torch.cat((self.cached_v, v), dim=2)
 
         # 注意力计算[3,7]
         attn = (q @ k) * self.scale  # [B, H, L, L_c]
@@ -74,7 +93,7 @@ class AdaLNCrossAttn(nn.Module):
         self.last_drop_p = last_drop_p
         self.embed_dim = embed_dim
         
-        # 跨注意力模块[2,4](@ref)
+        # 跨注意力模块
         self.cross_attn = CrossAttention(
             block_idx, embed_dim, num_heads, 
             attn_drop=attn_drop, proj_drop=drop, 

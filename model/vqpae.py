@@ -77,7 +77,8 @@ class VQPAE(nn.Module):
         # rotmats_avg = avg_rotation(rotmats_1, poc_mask)
         # rotmats_1 = rotmats_1.unsqueeze(1) @ rotmats_avg
         # trans_1, _ = self.zero_center_part(trans_1, res_mask, res_mask)
-        # trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)
+        # trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)n
+        
         
         
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
@@ -91,6 +92,7 @@ class VQPAE(nn.Module):
         # edge_embed = self.edge_proj(edge_embed) # (B,L,C)
         gen_mask,res_mask, angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
         
+        trans_1, _ = self.vqpae.zero_center_part(trans_1, gen_mask, res_mask)
         
         batched_res = {
             "rotmats": rotmats_1,
