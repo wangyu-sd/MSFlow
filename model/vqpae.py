@@ -92,7 +92,7 @@ class VQPAE(nn.Module):
         # edge_embed = self.edge_proj(edge_embed) # (B,L,C)
         gen_mask,res_mask, angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
         
-        trans_1, _ = self.vqpae.zero_center_part(trans_1, gen_mask, res_mask)
+        trans_1, _ = self.zero_center_part(trans_1, gen_mask, res_mask)
         
         batched_res = {
             "rotmats": rotmats_1,
