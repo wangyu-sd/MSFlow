@@ -129,7 +129,7 @@ class VectorQuantizer(nn.Module):
         return loss_all
 
         
-    def forward(self, f_BNC, col_samples=False, vae_stage=False, sampling=True):
+    def forward(self, f_BNC, col_samples=False, vae_stage=False, sampling=False):
         f_BCN = f_BNC.permute(0, 2, 1)
         B, C, N = f_BCN.shape
 
@@ -258,7 +258,7 @@ class VectorQuantizer(nn.Module):
 
         f_rest = f_BCN.detach().clone()
         f_hat = torch.zeros_like(f_rest)
-
+        self.update_embedding()
         idx_Bl: List[torch.Tensor] = []
         SN = len(self.scales)
         for si, pn in enumerate(self.scales):
@@ -276,24 +276,63 @@ class VectorQuantizer(nn.Module):
             # f_rest.sub_(h_BCn)
 
             idx_Bl.append(idx_Bn.reshape(B, pn))
+        f_hat = f_hat.permute(0, 2, 1) # B, N, C
+        return idx_Bl, f_hat
+    
+    
+    def idxBl_to_var_input2(self, gt_idx_Bl):
+        next_scales = []
+        B, N, C = gt_idx_Bl[0].shape[0], self.scales[-1], self.embedding_dim
+        SN = len(self.scales)
+        N = self.scales[-1]
+        # f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
+        pn_next = self.scales[0]
+        for si in range(SN-1):
+            h = self.embedding[gt_idx_Bl[si]]
+            h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(pn_next*2), mode='linear')
+            #From: 0,   1, 1, 2, 2, 2, 2
+            #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
+            # f_hat.add_(h_BCn)
+            # next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
+            next_scales.append(h_BCn.transpose(1, 2)) # B, N, C
+            pn_next = self.scales[si+1]
+            # next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
         
-        return idx_Bl
+        return torch.cat(next_scales, dim=1) # cat BlCs to BLC
+    
     
     def idxBl_to_var_input(self, gt_idx_Bl):
         next_scales = []
         B, N, C = gt_idx_Bl[0].shape[0], self.scales[-1], self.embedding_dim
         SN = len(self.scales)
-
-        # f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
+        N = self.scales[-1]
+        f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
         pn_next = self.scales[0]
         for si in range(SN-1):
             h = self.embedding[gt_idx_Bl[si]]
-            h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(pn_next * 2), mode='linear')
+            h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(N,), mode='linear')
             #From: 0,   1, 1, 2, 2, 2, 2
             #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
-            next_scales.append(h_BCn.transpose(1, 2)) # B, N, C
+            f_hat.add_(h_BCn)
+            # next_scales.append(h_BCn.transpose(1, 2)) # B, N, C
             pn_next = self.scales[si+1]
-            # next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
+            next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
+        
+        return torch.cat(next_scales, dim=1) # cat BlCs to BLC
+    
+    def idxBl_to_var_context(self, gt_idx_Bl):
+        next_scales = []
+        B, N, C = gt_idx_Bl[0].shape[0], self.scales[-1], self.embedding_dim
+        SN = len(self.scales)
+        N = self.scales[-1]
+        f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
+        pn_next = self.scales[0]
+        for si in range(SN):
+            h = self.embedding[gt_idx_Bl[si]]
+            h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(N,), mode='linear')
+            f_hat.add_(h_BCn)
+            next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
+            pn_next = self.scales[si+1]
         
         return torch.cat(next_scales, dim=1) # cat BlCs to BLC
     

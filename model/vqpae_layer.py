@@ -483,7 +483,7 @@ class VQPAEBlock(nn.Module):
     def pep_to_idxBl(self, batch, mode) -> List:
         node_embed, mask = self.encoder_step(batch, mode=mode)
         interpolated_nodes = self.before_quntized(node_embed, gen_mask=mask)
-
+    
         return self.quantizer.f_to_idxBl(interpolated_nodes)
     
     def poc_to_idxBl(self, batch) -> List:

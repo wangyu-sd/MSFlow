@@ -2,6 +2,7 @@ import torch, math
 import torch.nn as nn
 from functools import partial
 from typing import Tuple, List
+import torch.nn.functional as F
 
 from model.vq import VectorQuantizer
 from model.var_basics import AdaLNSelfAttn, AdaLNBeforeHead, SharedAdaLin, AdaLNCrossAttn
@@ -40,6 +41,7 @@ class PAR(nn.Module):
         # Input (word) embedding
         self.word_embed = nn.Linear(self.Cvae, self.C)
         quant: VectorQuantizer = vqpae.vqvae.quantizer
+        quant.update_embedding()
         self.vae_quant_proxy: Tuple[VectorQuantizer] = (quant, )
         self.vae_proxy: Tuple[VQPAEBlock] = (vqpae.vqvae, )
         
@@ -101,7 +103,7 @@ class PAR(nn.Module):
             batch_fea = batch
         else:
             batch_fea = self.get_batched_fea(batch)
-        gt_idx_Bl: List = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
+        gt_idx_Bl, _ = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
         return gt_idx_Bl
         
     
@@ -109,8 +111,8 @@ class PAR(nn.Module):
         
         with torch.no_grad():
             batch_fea = self.get_batched_fea(batch)
-            gt_idx_Bl: List = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
-            poc_idx_Bl: List = self.vqpae.vqvae.poc_to_idxBl(batch_fea)
+            gt_idx_Bl, _ = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
+            poc_idx_Bl, _ = self.vqpae.vqvae.poc_to_idxBl(batch_fea)
             
             gt_Bl = torch.cat(gt_idx_Bl, dim=1)
             poc_Bl = torch.cat(poc_idx_Bl, dim=1)
@@ -159,7 +161,7 @@ class PAR(nn.Module):
         batch_fea = self.get_batched_fea(batch)
         loss = self.vqpae(batch, mode='pep_given_poc')
         print(loss)
-        return self.postprocess(self.vae_proxy[0].forward(batch_fea, sampling=False), batch_fea)
+        return self.postprocess(self.vae_proxy[0].forward(batch_fea, sampling=True), batch_fea)
     
     @ torch.no_grad()
     def autoregressive_infer_cfg(self, batch, cfg, top_k, top_p):
@@ -167,7 +169,7 @@ class PAR(nn.Module):
         batch_fea = self.get_batched_fea(batch)
         B = batch_fea['node_embed'].shape[0]
         poc_cond = self.get_poc_cond(batch_fea)
-        poc_idx_Bl: List = self.vqpae.vqvae.poc_to_idxBl(batch_fea)
+        poc_idx_Bl, _ = self.vqpae.vqvae.poc_to_idxBl(batch_fea)
         # gt_Bl = torch.cat(gt_idx_Bl, dim=1)
         poc_Bl = torch.cat(poc_idx_Bl, dim=1)
         poc_context = self.vae_quant_proxy[0].embedding[poc_Bl]
@@ -198,7 +200,8 @@ class PAR(nn.Module):
             # t = cfg * ratio
             # logits_BLV = (1+t) * logits_BLV[:B] - t * logits_BLV[B:]
 
-            idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
+            # idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
+            idx_Bl = logits_BLV.argmax(dim=-1)
             h_BCn = self.vae_quant_proxy[0].embedding[idx_Bl]   # B, l, Cvae
             
             h_BCn = h_BCn.transpose_(1, 2).reshape(B, self.Cvae, pn)
@@ -211,16 +214,22 @@ class PAR(nn.Module):
         for block in self.blocks:
             block.cross_attn.kv_caching(False)
         
-        # gt_BL = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
+        # gt_BL, h_hat_gt1 = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
         # gt_BL = torch.cat(gt_BL, dim=1)
-        # f_hat_gt = self.vae_quant_proxy[0].embedding[gt_BL]   # B, l, Cvae
+        # h_gt_BL = self.vae_quant_proxy[0].embedding[gt_BL].permute(0, 2, 1)# B, l, Cvae
+        # f_hat_gt = h_gt_BL.new_zeros(B, self.Cvae, self.scales[-1])
+        # pn_start = 0
+        # for i, pn in enumerate(self.scales):
+        #     f_hat_gt.add_(F.interpolate(h_gt_BL[:, :, pn_start:pn_start+pn], size=(self.scales[-1]), mode='linear'))
+        #     pn_start += pn
         
+
         results = self.vae_proxy[0].fhat_to_graph(f_hat.transpose(1, 2), batch_fea, mode='pep_given_poc')
         return self.postprocess(results, batch_fea)
     
     def postprocess(self, results, batch_fea):
         
-        loss = self.vqpae.get_loss(results, batch_fea, mode='pep')
+        loss = self.vqpae.get_loss(results, batch_fea, mode='pep', rotate=False)
         print(loss)
         
         final =  {
@@ -253,7 +262,7 @@ class PAR(nn.Module):
         
         with torch.no_grad():
             batch_fea = self.get_batched_fea(batch)
-            gt_idx_Bl: List = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
+            gt_idx_Bl, _ = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
             # poc_idx_Bl = self.vqpae.vqvae.poc_to_idxBl(batch_fea)
             x_BLCv_wo_first_l = self.vae_quant_proxy[0].idxBl_to_var_input(gt_idx_Bl)
             poc_cond = self.get_poc_cond(batch_fea)
