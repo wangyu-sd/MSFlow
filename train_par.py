@@ -118,6 +118,7 @@ if __name__ == '__main__':
     config['device'] = args.device
 
     # Logging
+    ckpt_dir = None
     if args.debug:
         logger = get_logger('train', None)
         writer = BlackHole()
@@ -269,6 +270,7 @@ if __name__ == '__main__':
     
 
     
+    print("Ckpt Path:", ckpt_dir)
     try:
         for it in range(it_first, config.train.max_iters + 1):
             train(it, mode='pep_given_poc')
