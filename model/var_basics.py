@@ -38,14 +38,12 @@ class CrossAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop, inplace=True)
         self.attn_drop = nn.Dropout(attn_drop, inplace=True) if attn_drop > 0 else nn.Identity()
         self.caching = False
-        self.cached_k = None
-        self.cached_v = None
+        self.cached_q = None
     
-    def kv_caching(self, enable: bool):
+    def q_caching(self, enable: bool):
         self.caching = enable
         if not enable:
-            self.cached_k = None
-            self.cached_v = None
+            self.cached_q = None
 
     def forward(self, x, context, attn_bias=None):
         B, L, C = x.shape
@@ -64,15 +62,13 @@ class CrossAttention(nn.Module):
             
             
         # KV缓存
-        # if self.caching:
-        #     if self.cached_k is None: 
-        #         self.cached_k = k
-        #         self.cached_v = v
-        #     else: 
-        #         k = self.cached_k = torch.cat((self.cached_k, k), dim=2)
-        #         v = self.cached_v = torch.cat((self.cached_v, v), dim=2)
+        if self.caching:
+            if self.cached_q is None: 
+                self.cached_k = q
 
-        # 注意力计算[3,7]
+            else: 
+                q = self.cached_k = torch.cat((self.cached_q, q), dim=2)
+
         attn = (q @ k) * self.scale  # [B, H, L, L_c]
         if attn_bias is not None:
             attn += attn_bias

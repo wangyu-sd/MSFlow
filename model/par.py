@@ -118,7 +118,7 @@ class PAR(nn.Module):
             poc_Bl = torch.cat(poc_idx_Bl, dim=1)
             
             # gt_fea = self.vae_quant_proxy[0].embedding[gt_Bl]   # B, l, Cvae
-            poc_context = self.vae_quant_proxy[0].embedding[poc_Bl]
+            poc_context = self.vae_quant_proxy[0].embedding[poc_Bl] # TODO 
             
             x_BLCv_wo_first_l = self.vae_quant_proxy[0].idxBl_to_var_input(gt_idx_Bl)
             poc_cond = self.get_poc_cond(batch_fea)
@@ -185,23 +185,31 @@ class PAR(nn.Module):
         cur_L = 0
         f_hat = sos.new_zeros(B, self.Cvae, self.scales[-1])
         for block in self.blocks:
-            block.cross_attn.kv_caching(True)
+            block.cross_attn.q_caching(False)
         
+        x_raw = next_token_map.new_zeros((0,))
+        idx_Bl_list = []
+        gt_BL, h_hat_gt1 = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
         for si, pn in enumerate(self.scales):
             ratio = si / self.num_scales_minus_1
             cur_L += pn
 
             cond_BD_or_gss = self.shared_ada_lin(cond_BD)
-            x = next_token_map
+            x_raw = torch.cat([x_raw, next_token_map], dim=1)
+            x = x_raw
             for block in self.blocks:
                 x = block(x=x, context=poc_context, cond_BD=cond_BD_or_gss, attn_bias=None)
             logits_BLV = self.head(self.head_nm(x.float(), cond_BD).float()).float() # codeword for each L => B, L, V
-
+            logits_BLV  = logits_BLV[:, cur_L-pn:cur_L, :] # SOS + L-1 + l_wo_frst
             # t = cfg * ratio
             # logits_BLV = (1+t) * logits_BLV[:B] - t * logits_BLV[B:]
 
             # idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
-            idx_Bl = logits_BLV.argmax(dim=-1)
+            if si >= 0:
+                idx_Bl = logits_BLV.argmax(dim=-1)
+            else:
+                idx_Bl = gt_BL[si]
+            idx_Bl_list.append(idx_Bl)
             h_BCn = self.vae_quant_proxy[0].embedding[idx_Bl]   # B, l, Cvae
             
             h_BCn = h_BCn.transpose_(1, 2).reshape(B, self.Cvae, pn)
@@ -212,16 +220,16 @@ class PAR(nn.Module):
                 # next_token_map = next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
         
         for block in self.blocks:
-            block.cross_attn.kv_caching(False)
+            block.cross_attn.q_caching(False)
         
         # gt_BL, h_hat_gt1 = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
-        # gt_BL = torch.cat(gt_BL, dim=1)
-        # h_gt_BL = self.vae_quant_proxy[0].embedding[gt_BL].permute(0, 2, 1)# B, l, Cvae
-        # f_hat_gt = h_gt_BL.new_zeros(B, self.Cvae, self.scales[-1])
-        # pn_start = 0
-        # for i, pn in enumerate(self.scales):
-        #     f_hat_gt.add_(F.interpolate(h_gt_BL[:, :, pn_start:pn_start+pn], size=(self.scales[-1]), mode='linear'))
-        #     pn_start += pn
+        gt_BL = torch.cat(gt_BL, dim=1)
+        h_gt_BL = self.vae_quant_proxy[0].embedding[gt_BL].permute(0, 2, 1)# B, l, Cvae
+        f_hat_gt = h_gt_BL.new_zeros(B, self.Cvae, self.scales[-1])
+        pn_start = 0
+        for i, pn in enumerate(self.scales):
+            f_hat_gt.add_(F.interpolate(h_gt_BL[:, :, pn_start:pn_start+pn], size=(self.scales[-1]), mode='linear'))
+            pn_start += pn
         
 
         results = self.vae_proxy[0].fhat_to_graph(f_hat.transpose(1, 2), batch_fea, mode='pep_given_poc')

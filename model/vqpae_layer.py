@@ -13,7 +13,7 @@ from model.vq import VectorQuantizer
 from dm import so3_utils
 from torch.nn.utils.rnn import pad_sequence
 import openfold.utils.rigid_utils as ru
-
+from model.modules.common.geometry import construct_3d_basis
 
 
 class VQPAEBlock(nn.Module):

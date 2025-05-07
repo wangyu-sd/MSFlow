@@ -162,7 +162,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default="log_par/learn_all[main-ccf3179]_2025_05_05__13_05_47/checkpoints/50000.pt")
+    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/log_par/learn_all[main-de81ee7]_2025_05_06__10_20_30/checkpoints/90000.pt")
     parser.add_argument('--from_pretrain', type=str, default="logs/learn_all[main-f067471]_2025_05_04__15_09_44/checkpoints/15000.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
@@ -253,7 +253,7 @@ if __name__ == '__main__':
 
 
     logger.info('Start sampling for in res_dir: %s' % res_dir)
-    for batch_idx, batch in enumerate(tqdm(val_loader, desc='Validate', dynamic_ncols=True)):
+    for batch_idx, batch in enumerate(tqdm(train_loader, desc='Validate', dynamic_ncols=True)):
             # Prepare data
             
             
