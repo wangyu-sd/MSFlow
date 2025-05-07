@@ -70,9 +70,9 @@ class VQPAE(nn.Module):
             trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
             seqs_1 = batch['aa']
             context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
-            trans_1, rotmats_1 = align_to_principal_axis(trans_1, rotmats_1, context_mask)
+            trans_1, rotmats_1 = align_to_principal_axis(trans_1, rotmats_1,context_mask)
             angles_1 = batch['torsion_angle']
-            poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
+            # poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
         # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         # structure_mask = context_mask 
         # sequence_mask = context_mask
@@ -80,14 +80,14 @@ class VQPAE(nn.Module):
         rotmats_1 = rotmats_1 * batch['res_mask'][..., None, None]
         # rotmats_avg = avg_rotation(rotmats_1, poc_mask)
         # rotmats_1 = rotmats_1.unsqueeze(1) @ rotmats_avg
-        # trans_1, _ = self.zero_center_part(trans_1, res_mask, res_mask)
+        trans_1, _ = self.zero_center_part(trans_1,  batch['generate_mask'], batch['res_mask'])
         # trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)n
     
-            
+        # trans_1 = self.zero_center_part()
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
-                                        batch['mask_heavyatom'], structure_mask=poc_mask, sequence_mask=poc_mask)
+                                        batch['mask_heavyatom'], structure_mask=context_mask, sequence_mask=context_mask)
         edge_embed = self.edge_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
-                                        batch['mask_heavyatom'], structure_mask=poc_mask, sequence_mask=poc_mask)
+                                        batch['mask_heavyatom'], structure_mask=context_mask, sequence_mask=context_mask)
         
         
         # num_batch, num_res = batch['aa'].shape
@@ -145,15 +145,14 @@ class VQPAE(nn.Module):
             raise ValueError(f"Unknown mode: {mode} in get_loss function")
         
         
-        # pred_trans_c, _ = self.zero_center_part(pred_trans, gen_mask, res_mask)
-        pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans, gen_mask)
+        pred_trans_c, _ = self.zero_center_part(pred_trans, gen_mask, res_mask)
+        pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_c, gen_mask)
         trans_gen = self.strc_loss_fn.extract_fea_from_gen(trans, gen_mask)
         pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotamats, gen_mask)
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
         
         # # Add global rotation ===========
-        # if rotate:
-        #     trans_gen =  (rotamats_gen[:, 0:1].transpose(-1, -2) @ trans_gen.unsqueeze(-1)).squeeze(-1)
+        # trans_gen =  (rotamats_gen[:, 0:1].transpose(-1, -2) @ trans_gen.unsqueeze(-1)).squeeze(-1)
         # # ===============================
         
         
@@ -165,12 +164,12 @@ class VQPAE(nn.Module):
         strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm)
         
         # # cleanning rotamats =================
-        # if rotate:
-        #     global_rot = rotamats_gen[:, 0].clone()
-        #     rotamats_gen = rotamats_gen[:, 0:1].transpose(-1, -2) @ rotamats_gen
+        
+        # global_rot = rotamats_gen[:, 0].clone()
+        # rotamats_gen = rotamats_gen[:, 0:1].transpose(-1, -2) @ rotamats_gen
         # # ====================================
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats_gen) 
-        # pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot.unsqueeze(dim=1)@pred_rotamats_gen) 
+        # pred_rotmats_vec = so3_utils.rotmat_to_rotvec(global_rot.unsqueeze(dim=1)@pred_rotamats_gen) 
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotamats_gen)
         rot_loss = torch.sum(((rotamats_vec - pred_rotmats_vec))**2*gen_mask_sm[...,None],dim=(-1,-2)) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
         rot_loss = torch.mean(rot_loss)
