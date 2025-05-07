@@ -250,7 +250,7 @@ if __name__ == '__main__':
                 batch = recursive_to(batch, args.device)
 
                 logits_BLV, gt_BL = model(batch) # get loss and metrics
-                loss = F.corss_entropy(logits_BLV.view(-1, logits_BLV.size(-1)), gt_BL.view(-1), reduction='none')
+                loss = F.cross_entropy(logits_BLV.view(-1, logits_BLV.size(-1)), gt_BL.view(-1), reduction='none')
                 loss = loss.mean()
 
                 scalar_accum.add(name='loss', value=loss, batchsize=len(batch['aa']), mode='mean')

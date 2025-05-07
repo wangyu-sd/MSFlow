@@ -97,9 +97,9 @@ class VectorQuantizer(nn.Module):
         d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], key[:, :self.rot_idx])
         d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], key[:, self.rot_idx:self.trans_idx])
         d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], key[:, self.trans_idx:self.angle_idx])
-        d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], key[:, self.angle_idx:])
+        # d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], key[:, self.angle_idx:])
         
-        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans, d_no_grad_angle], return_dist=return_dist)
+        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans], return_dist=return_dist)
         
         return d_no_grad
     
@@ -122,9 +122,9 @@ class VectorQuantizer(nn.Module):
         loss_fea = F.mse_loss(x[:, :self.rot_idx], y[:, :self.rot_idx])
         loss_rot = F.mse_loss(x[:, self.rot_idx:self.trans_idx], y[:, self.rot_idx:self.trans_idx])
         loss_trans = F.mse_loss(x[:, self.trans_idx:self.angle_idx], y[:, self.trans_idx:self.angle_idx])
-        loss_angle = F.mse_loss(x[:, self.angle_idx:], y[:, self.angle_idx:])
+        # loss_angle = F.mse_loss(x[:, self.angle_idx:], y[:, self.angle_idx:])
         
-        loss_all = loss_fea + loss_rot + loss_trans + loss_angle
+        loss_all = loss_fea + loss_rot + loss_trans
         
         return loss_all
 
@@ -214,7 +214,7 @@ class VectorQuantizer(nn.Module):
         samples = self.collected_samples.detach().cpu().numpy()
         
         # split features
-        split_shape =  [self.rot_idx, self.trans_idx, self.angle_idx, self.embedding_dim]
+        split_shape =  [self.rot_idx, self.trans_idx, self.embedding_dim]
         start_idx = 0
         for end_idx in split_shape:
             samples[:, start_idx:end_idx] = samples[:, start_idx:end_idx] / math.sqrt(end_idx - start_idx)
@@ -305,13 +305,12 @@ class VectorQuantizer(nn.Module):
         next_scales = []
         B, N, C = gt_idx_Bl[0].shape[0], self.scales[-1], self.embedding_dim
         SN = len(self.scales)
-        N = self.scales[-1]
         f_hat = gt_idx_Bl[0].new_zeros(B, C, N, dtype=torch.float32)
         pn_next = self.scales[0]
         for si in range(SN-1):
             h = self.embedding[gt_idx_Bl[si]]
             h_BCn = F.interpolate(h.transpose_(1, 2).view(B, C, pn_next), size=(N,), mode='linear')
-            #From: 0,   1, 1, 2, 2, 2, 2
+            #From: 0, 1, 1, 2, 2, 2, 2
             #To:   cls, 0, 0, 1, 1, 1, 1  (cls will be added out of this function)
             f_hat.add_(h_BCn)
             # next_scales.append(h_BCn.transpose(1, 2)) # B, N, C

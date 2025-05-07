@@ -11,7 +11,7 @@ import torch.nn.functional as F
 # from torch.utils.data import DataLoader
 # import os
 # import argparse
-from typing import Dict
+from typing import Dict, Tuple
 
 # import pandas as pd
 
@@ -65,26 +65,29 @@ class VQPAE(nn.Module):
         # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
     
     def extract_fea(self, batch):
-        rotmats_1 =  construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])  
-        trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
-        seqs_1 = batch['aa']
-    
+        with torch.no_grad():
+            rotmats_1 = construct_3d_basis(batch['pos_heavyatom'][:, :, BBHeavyAtom.CA],batch['pos_heavyatom'][:, :, BBHeavyAtom.C],batch['pos_heavyatom'][:, :, BBHeavyAtom.N])  
+            trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
+            seqs_1 = batch['aa']
+            context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
+            trans_1, rotmats_1 = align_to_principal_axis(trans_1, rotmats_1, context_mask)
+
+
         angles_1 = batch['torsion_angle']
         # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         # structure_mask = context_mask 
         # sequence_mask = context_mask
-        # poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
+        
         # rotmats_avg = avg_rotation(rotmats_1, poc_mask)
         # rotmats_1 = rotmats_1.unsqueeze(1) @ rotmats_avg
         # trans_1, _ = self.zero_center_part(trans_1, res_mask, res_mask)
         # trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)n
-        
-        
-        
+    
+        poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
-                                        batch['mask_heavyatom'], structure_mask=batch['res_mask'], sequence_mask=batch['res_mask'])
+                                        batch['mask_heavyatom'], structure_mask=poc_mask, sequence_mask=poc_mask)
         edge_embed = self.edge_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
-                                        batch['mask_heavyatom'], structure_mask=batch['res_mask'], sequence_mask=batch['res_mask'])
+                                        batch['mask_heavyatom'], structure_mask=poc_mask, sequence_mask=poc_mask)
         
         
         # num_batch, num_res = batch['aa'].shape
@@ -92,7 +95,7 @@ class VQPAE(nn.Module):
         # edge_embed = self.edge_proj(edge_embed) # (B,L,C)
         gen_mask,res_mask, angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
         
-        trans_1, _ = self.zero_center_part(trans_1, gen_mask, res_mask)
+        # trans_1, _ = self.zero_center_part(trans_1, gen_mask, res_mask)
         
         batched_res = {
             "rotmats": rotmats_1,
@@ -150,7 +153,7 @@ class VQPAE(nn.Module):
     #     return loss.sum()
     
     
-    def get_loss(self, res, fea_dict, mode, weigeht=1., rotate=True):
+    def get_loss(self, res, fea_dict, mode, weigeht=1.):
         pred_trans, pred_rotmats, pred_angles, pred_seqs_prob = \
             res['pred_trans'], res['pred_rotmats'], res['pred_angles'], res['pred_seqs']
         
@@ -168,16 +171,16 @@ class VQPAE(nn.Module):
             raise ValueError(f"Unknown mode: {mode} in get_loss function")
         
         
-        pred_trans_c, _ = self.zero_center_part(pred_trans, gen_mask, res_mask)
-        pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_c, gen_mask)
+        # pred_trans_c, _ = self.zero_center_part(pred_trans, gen_mask, res_mask)
+        pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans, gen_mask)
         trans_gen = self.strc_loss_fn.extract_fea_from_gen(trans, gen_mask)
         pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotamats, gen_mask)
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
         
-        # Add global rotation ===========
-        if rotate:
-            trans_gen =  (rotamats_gen[:, 0:1].transpose(-1, -2) @ trans_gen.unsqueeze(-1)).squeeze(-1)
-        # ===============================
+        # # Add global rotation ===========
+        # if rotate:
+        #     trans_gen =  (rotamats_gen[:, 0:1].transpose(-1, -2) @ trans_gen.unsqueeze(-1)).squeeze(-1)
+        # # ===============================
         
         
         # pred_trans_gen, _, rot = batch_align_with_r(pred_trans_gen, trans_gen, gen_mask_sm.bool())
@@ -187,11 +190,11 @@ class VQPAE(nn.Module):
         
         strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm)
         
-        # cleanning rotamats =================
-        if rotate:
-            global_rot = rotamats_gen[:, 0].clone()
-            rotamats_gen = rotamats_gen[:, 0:1].transpose(-1, -2) @ rotamats_gen
-        # ====================================
+        # # cleanning rotamats =================
+        # if rotate:
+        #     global_rot = rotamats_gen[:, 0].clone()
+        #     rotamats_gen = rotamats_gen[:, 0:1].transpose(-1, -2) @ rotamats_gen
+        # # ====================================
         rotamats_vec = so3_utils.rotmat_to_rotvec(rotamats_gen) 
         # pred_rotmats_vec = so3_utils.rotmat_to_rotvec(rot.unsqueeze(dim=1)@pred_rotamats_gen) 
         pred_rotmats_vec = so3_utils.rotmat_to_rotvec(pred_rotamats_gen)
@@ -199,17 +202,18 @@ class VQPAE(nn.Module):
         rot_loss = torch.mean(rot_loss)
         
         # Calculate Global Vec ==================================
-        if rotate:
-            global_rot_vec = so3_utils.rotmat_to_rotvec(global_rot)
-            global_rot_vec_pred = so3_utils.rotmat_to_rotvec(res['pred_rotmats'])
-            poc_mask = torch.logical_and(res_mask, 1-gen_mask)
-            global_rot_vec_pred = (global_rot_vec_pred * poc_mask[...,None]).sum(dim=1) / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)
-            global_rot_loss = (global_rot_vec - global_rot_vec_pred).pow(2).sum(dim=-1)
-            global_rot_loss = global_rot_loss.mean()
-        # global_rotmats_loss = torch.mean(global_pred_rotmats_vec**2)
-        else:
-            # ==========================================================
-            global_rot_loss = 0.
+        # if rotate:
+        #     global_rot_vec = so3_utils.rotmat_to_rotvec(global_rot)
+        #     global_rot_vec_pred = so3_utils.rotmat_to_rotvec(res['pred_rotmats'])
+        #     poc_mask = torch.logical_and(res_mask, 1-gen_mask)
+        #     global_rot_vec_pred = (global_rot_vec_pred * poc_mask[...,None]).sum(dim=1) / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)
+        #     global_rot_loss = (global_rot_vec - global_rot_vec_pred).pow(2).sum(dim=-1)
+        #     global_rot_loss = global_rot_loss.mean()
+        # # global_rotmats_loss = torch.mean(global_pred_rotmats_vec**2)
+        # else:
+        #     # ==========================================================
+        #     global_rot_loss = 0.
+        global_rot_loss = 0.
         
         # bb aux loss
         gt_bb_atoms = all_atom.to_atom37(trans_gen, rotamats_gen)[:, :, :3] 
@@ -266,10 +270,10 @@ class VQPAE(nn.Module):
 
         #encode
         fea_dict: Dict[str:torch.Tensor] = self.extract_fea(batch) # no generate mask
-        res_mask, gen_mask = fea_dict['res_mask'], fea_dict['generate_mask']
-        fea_dict['trans_raw'] = fea_dict['trans']
+        # res_mask, gen_mask = fea_dict['res_mask'], fea_dict['generate_mask']
+        # fea_dict['trans_raw'] = fea_dict['trans']
         
-        fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], gen_mask, res_mask)
+        # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], gen_mask, res_mask)
         all_loss, poc_loss, pep_loss = None, None, None
         
         if mode == "codebook":
@@ -283,7 +287,13 @@ class VQPAE(nn.Module):
             res = self.vqvae(fea_dict, mode="poc_and_pep")
             all_loss = self.get_loss(res, fea_dict, "all")
             
-        # elif mode == "poc_or_pep":
+        elif mode == "pep_or_poc":
+            res = self.vqvae(fea_dict, mode="poc")
+            poc_loss = self.get_loss(res, fea_dict, "poc", weigeht=0.1)
+            
+            res_pep = self.vqvae(fea_dict, mode="pep_given_poc")
+            pep_loss = self.get_loss(res_pep, fea_dict, "pep")
+            
         elif mode == "pep_given_poc":
             # poc_mask = torch.logical_and(res_mask, 1-gen_mask)
             # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], poc_mask, poc_mask)
@@ -298,26 +308,71 @@ class VQPAE(nn.Module):
 
         return all_loss, poc_loss, pep_loss
 
-def torsion_entropy(sin_cos_pred):
+
+
+def compute_principal_axis(trans: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
     """
-    sin_cos_pred: (B, L, 4, 2) 预测的sin/cos值
+    输入：
+        trans: [B, N, 3] 位置矩阵
+        node_mask: [B, N] 有效点掩码
+    输出：
+        rotation_matrix: [B, 3, 3] 将点云对齐到主轴的旋转矩阵
     """
-    # 计算角度分布熵
-    angles = torch.atan2(sin_cos_pred[...,0], sin_cos_pred[...,1])  # (B,L,4)
-    hist = torch.histc(angles, bins=36, min=-math.pi, max=math.pi)  # (B,36)
-    prob = hist / hist.sum(dim=1, keepdim=True)
-    entropy = -torch.sum(prob * torch.log(prob + 1e-6), dim=1)  # (B,)
+    B, N, _ = trans.shape
     
-    return entropy
+    # 计算有效点的质心
+    masked_trans = trans * node_mask.unsqueeze(-1)  # [B, N, 3]
+    valid_count = node_mask.sum(dim=1, keepdim=True) + 1e-7  # [B, 1]
+    centroid = masked_trans.sum(dim=1) / valid_count  # [B, 3]
+    
+    # 去中心化
+    centered = trans - centroid.unsqueeze(1)  # [B, N, 3]
+    
+    # 计算协方差矩阵（考虑掩码）
+    cov_matrix = torch.einsum('bni,bnj->bij', centered * node_mask.unsqueeze(-1), centered * node_mask.unsqueeze(-1)) / valid_count[..., None]  # [B, 3, 3]
+    
+    # 特征分解
+    eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix, UPLO='U')  # [B,3], [B,3,3]
+    
+    # 按特征值降序排列（主轴为最大特征值对应向量）
+    sorted_indices = torch.argsort(eigenvalues, descending=True, dim=1)
+    eigenvectors = torch.stack([eigenvectors[b, :, sorted_indices[b]] for b in range(B)])
+    
+    # 确保右手坐标系（PCA配准原理）
+    cross = torch.cross(eigenvectors[:, :, 0], eigenvectors[:, :, 1], dim=1)
+    eigenvectors[:, :, 2] = cross / (torch.norm(cross, dim=1, keepdim=True) + 1e-7)
+    
+    return eigenvectors.transpose(1, 2)  # [B, 3, 3]
 
+def align_to_principal_axis(
+    trans: torch.Tensor, 
+    rotation: torch.Tensor,
+    node_mask: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    输入：
+        trans: [B, N, 3] 位置矩阵
+        rotation: [B, N, 3, 3] 原始旋转矩阵
+        node_mask: [B, N] 有效点掩码
+    输出：
+        aligned_trans: [B, N, 3] 标准化后的位置
+        aligned_rotation: [B, N, 3, 3] 标准化后的旋转矩阵
+    """
+    B, N = trans.shape[:2]
+    
+    # 计算全局旋转矩阵
+    global_rot = compute_principal_axis(trans, node_mask)  # [B, 3, 3]
+    global_rot_inv = global_rot.transpose(1, 2)  # 逆矩阵
+    
+    # 应用全局旋转到每个点
+    centroid = torch.mean(trans * node_mask.unsqueeze(-1), dim=1, keepdim=True)  # [B, 1, 3]
+    aligned_trans = torch.einsum('bij,bnj->bni', global_rot_inv, trans - centroid)  # [B, N, 3]
+    
+    # 更新旋转矩阵（张量旋转方法）
+    aligned_rotation = torch.einsum('bnij,bnjk->bnik', rotation, global_rot_inv.unsqueeze(1).expand(B, N, 3, 3))  # [B, N, 3, 3]
+    
+    return aligned_trans, aligned_rotation
 
-
-def avg_rotation(R_avg_unc, poc_mask):
-        quat_avg = ru.rot_to_quat(R_avg_unc)
-        quat_avg = (quat_avg * poc_mask[..., None]).sum(dim=1)  / (poc_mask.sum(dim=1, keepdim=True) + 1e-6)
-        quat_avg = quat_avg/(quat_avg.norm(dim=-1, keepdim=True)+1e-6)
-        R_avg = ru.quat_to_rot(quat_avg)
-        return R_avg # B,3,3
     
 
 class ProteinStructureLoss(nn.Module):
@@ -384,7 +439,7 @@ class ProteinStructureLoss(nn.Module):
     
     def compute_dihedrals(self, coords):
         """计算四个连续Cα的二面角 (phi/psi)"""
-        # 参考AlphaFold几何编码[8](@ref)
+        # 参考AlphaFold几何编码
         p0, p1, p2, p3 = coords[:, :-3], coords[:, 1:-2], coords[:, 2:-1], coords[:, 3:]
         
         v1 = p1 - p0
@@ -476,7 +531,7 @@ class ProteinStructureLoss(nn.Module):
         dist_loss, clash_loss = self.dist_and_clash_loss(pred, target, mask)
         # fape_loss = self.fape_loss(pred, target, mask)
         
-        # 动态权重设置(参考Distance-AF[3](@ref))
+        # 动态权重设置(参考Distance-AF)
         
         return {
             # 'pos_loss': pos_loss,
@@ -490,7 +545,7 @@ class ProteinStructureLoss(nn.Module):
 
 def kabsch_transform(pred, target, mask):
     """
-    可微分Kabsch对齐实现[8](@ref)
+    可微分Kabsch对齐实现[8]
     输入: 
         pred:   (B, N, 3) 预测坐标 
         target: (B, N, 3) 真实坐标

@@ -243,6 +243,7 @@ if __name__ == '__main__':
     if args.resume is not None:
         ckpt = torch.load(args.resume, map_location=args.device, weights_only=True)
         model_par: PAR = PAR(model_vq, ckpt['config']).to(args.device)
+        model_par.load_state_dict(ckpt['model'])
     else:
         model_par: PAR = PAR(model_vq, config).to(args.device)
     logger.info(f'Number of parameters for model: {count_parameters(model_vq)*1e-7:.2f}M')
@@ -253,7 +254,7 @@ if __name__ == '__main__':
 
 
     logger.info('Start sampling for in res_dir: %s' % res_dir)
-    for batch_idx, batch in enumerate(tqdm(train_loader, desc='Validate', dynamic_ncols=True)):
+    for batch_idx, batch in enumerate(tqdm(val_loader, desc='Test', dynamic_ncols=True)):
             # Prepare data
             
             

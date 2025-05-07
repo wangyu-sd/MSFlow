@@ -136,13 +136,16 @@ class PAR(nn.Module):
 
         # Whole sequence (SOS + sequence without first l)
         x_BLC = torch.cat((sos, self.word_embed(x_BLCv_wo_first_l.float())), dim=1) # B, 1+L-1 (sos+l_wo_frst), C
+        
         lvl_emb = self.lvl_embed(self.lvl_1L.expand(B, -1)) + self.pos_1LC 
         
-        x_BLC = x_BLC + lvl_emb # Add positional embedding => B, L, C
-        
+        x_BLC_temp = x_BLC + lvl_emb # Add positional embedding => B, L, C
+        x_BLC = x_BLC_temp
         # poc_BLC = torch.cat((sos, self.word_embed(poc_context.float())), dim=1) # B, L, C
         poc_BLC = self.word_embed(poc_context.float()) # B, L, C
-        poc_BLC = poc_BLC + lvl_emb # Add positional embedding => B, L, C
+        poc_BLC_temp = poc_BLC + lvl_emb # Add positional embedding => B, L, C
+        
+        poc_BLC = poc_BLC_temp
 
         # Masking and SharedAdaLN
         attn_bias = self.attn_bias_for_masking # 1, 1, L, L
@@ -189,7 +192,14 @@ class PAR(nn.Module):
         
         x_raw = next_token_map.new_zeros((0,))
         idx_Bl_list = []
+        
+        # x_BLC, gt_Bl = self.forward(batch)
+        # loss = F.cross_entropy(x_BLC.view(-1, self.V), gt_Bl.view(-1), reduction='none')
+        # loss = loss.mean()
+        # print("PAR loss: ", loss.item())
         gt_BL, h_hat_gt1 = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
+        # _, _, x_BLC_temp, poc_BLC_tem = self.forward(batch)
+        
         for si, pn in enumerate(self.scales):
             ratio = si / self.num_scales_minus_1
             cur_L += pn
@@ -198,14 +208,15 @@ class PAR(nn.Module):
             x_raw = torch.cat([x_raw, next_token_map], dim=1)
             x = x_raw
             for block in self.blocks:
-                x = block(x=x, context=poc_context, cond_BD=cond_BD_or_gss, attn_bias=None)
+                x = block(x=x, context=poc_context, cond_BD=cond_BD_or_gss, attn_bias=self.attn_bias_for_masking[:, :, :x.size(1), :])
             logits_BLV = self.head(self.head_nm(x.float(), cond_BD).float()).float() # codeword for each L => B, L, V
             logits_BLV  = logits_BLV[:, cur_L-pn:cur_L, :] # SOS + L-1 + l_wo_frst
             # t = cfg * ratio
             # logits_BLV = (1+t) * logits_BLV[:B] - t * logits_BLV[B:]
 
-            # idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
+            # 
             if si >= 0:
+                # idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
                 idx_Bl = logits_BLV.argmax(dim=-1)
             else:
                 idx_Bl = gt_BL[si]

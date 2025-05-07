@@ -266,7 +266,7 @@ if __name__ == '__main__':
                     break
                     
             else:
-                train(it, mode='pep_given_poc')
+                train(it, mode='pep_or_poc')
                     
                     
             # if it % config.train.val_freq == 0:

@@ -43,12 +43,12 @@ class VQPAEBlock(nn.Module):
             nn.GELU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
         )
-        self.feat_dim = self._ipa_conf.c_s
-        self.angle_fuese_net = nn.Sequential(
-            nn.Linear(angle_dim, self._ipa_conf.c_s),nn.GELU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
-        )
-        self.angle_res = nn.Linear(angle_dim, 5)
+        # self.feat_dim = self._ipa_conf.c_s
+        # self.angle_fuese_net = nn.Sequential(
+        #     nn.Linear(angle_dim, self._ipa_conf.c_s),nn.GELU(),
+        #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
+        # )
+        # self.angle_res = nn.Linear(angle_dim, 5)
         self.angle_dim = angle_dim
         # 主干拆分
         self.encoder_trunk = nn.ModuleDict()
@@ -64,7 +64,7 @@ class VQPAEBlock(nn.Module):
         
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s + 3 + 3 + angle_dim,   
+            embedding_dim=self._ipa_conf.c_s + 3 + 3,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
@@ -125,7 +125,7 @@ class VQPAEBlock(nn.Module):
         
         trunk[f'bb_update_{b}'] = ipa_pytorch.BackboneUpdate(
             self._ipa_conf.c_s, use_rot_updates=True)
-        trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
+        # trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
 
 
         # No edge update on the last block.
@@ -186,65 +186,45 @@ class VQPAEBlock(nn.Module):
                 edge_embed = e + edge_embed * edge_mask[..., None]
                 
         return node_embed, edge_embed, curr_rigids
-        
-        
-    def extrct_batch_gen(self, batch, gen_mask=None):
-        batch_gen = {}
-        if gen_mask is None : gen_mask = batch['generate_mask']
-        edge_mask_gen = gen_mask[:, None] * gen_mask[:, :, None]
-        gen_mask, edge_mask_gen = gen_mask.bool(), edge_mask_gen.bool()
-        for key, value in batch.items():
-            if key == "edge_embed":
-                continue
-            value_list = [value[i][gen_mask[i]] for i in range(value.shape[0])]
-            value_tensor = pad_sequence(value_list, batch_first=True, padding_value=0.)
-            batch_gen[key] = value_tensor
-        if  "edge_embed" in batch.keys():
-            max_num_gen = gen_mask.sum(dim=1).max().item()
-            edge_mask_sm = batch_gen['generate_mask'][:, None] * batch_gen['generate_mask'][:, :, None]
-            batch_gen['edge_embed'] = torch.zeros(gen_mask.size(0), max_num_gen, max_num_gen,batch['edge_embed'].size(-1), device=gen_mask.device)
-            batch_gen['edge_embed'][edge_mask_sm.bool()] = batch['edge_embed'][edge_mask_gen]
-        return batch_gen
     
     
-    def rigid_to_se3invarint(self,rigid=None, gen_mask=None, trans=None, rotmats=None):
-        if rigid is not None:
-            trans = rigid.get_trans()
-            rotmats = rigid.get_rots().get_rot_mats()
+    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=False):
+        """
+            batch contains: rotmats, trans, angles, seqs, node_embed, 
+                edge_embed, generate_mask, res_mask
+        Returns:
+            _type_: _description_
+        """
+        # node_emb_raw = batch['node_embed']
+        node_embed_sm, gen_mask_sm = self.encoder_step(batch, mode)
+        quantized = self.before_quntized(node_embed_sm, gen_mask=gen_mask_sm) # TODO Add more choices for gen_mask
         
-        batch_gen = self.extrct_batch_gen({
-            "trans": trans, "rotmats": rotmats, "generate_mask": gen_mask,
-        })
-        # rot_clean = batch_gen['rotmats'][:, :-1].transpose(-1, -2) @ batch_gen['rotmats'][:, 1:]
-        # trans_clean = batch_gen['trans'][:, :-1] - batch_gen['trans'][:, 1:]
+        quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized, sampling=sampling)
         
+        quantized = self.after_quntized(quantized, gen_mask=batch['generate_mask'])
         
-        # rot_anchor = batch_gen['rotmats'][:, 0]
-        # trans_anchor = batch_gen['trans'][:, 0]
-        rot_clean = batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ batch_gen['rotmats']
-        trans_clean = (batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ batch_gen['trans'].unsqueeze(-1)).squeeze(-1)
+        res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
+        res['commitment_loss'] = commitment_loss
+        res['q_latent_loss'] = q_latent_loss
+        res['div_loss'] = div_loss
 
-        # (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
-
-        # batch_gen['rotmats'][:, 0] =  rot_anchor.transpose(-1, -2) @ rot_anchor
-        # batch_gen['trans'][:, 0] = trans_anchor - trans_anchor
-        
-        trans[gen_mask.bool()] = trans_clean[batch_gen['generate_mask'].bool()]
-        rotmats[gen_mask.bool()] = rot_clean[batch_gen['generate_mask'].bool()]
-        
-        return trans, rotmats
+        return res
     
     def encoder_step(self, batch, mode):
         batch_raw = batch
-        if mode == "poc_and_pep" or mode == "pep_given_poc" or mode=='codebook':
-            batch = self.extrct_batch_gen(batch)
+        if mode == "pep_given_poc":
+            batch = self.extract_batch_gen(batch)
             node_mask = batch["res_mask"]
+            gen_mask = batch['generate_mask']
         elif mode == "poc":
             node_mask = torch.logical_and(batch["res_mask"], 1-batch["generate_mask"])
+            batch = self.extract_batch_gen(batch, gen_mask=node_mask)
+            node_mask = [node_mask[i][node_mask[i]] for i in range(node_mask.shape[0])]
+            node_mask = pad_sequence(node_mask, batch_first=True, padding_value=0.).float()
+            gen_mask = node_mask
         else:
             raise ValueError(f"Invalid mode: {mode}")
         
-        gen_mask = batch['generate_mask'] if mode == "pep_given_poc" else node_mask
         rotmats = batch['rotmats'] * node_mask[..., None, None]
         trans = batch['trans'] * node_mask[..., None]
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
@@ -254,7 +234,7 @@ class VQPAEBlock(nn.Module):
         
         # rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
         # trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
-        trans, rotmats = self.rigid_to_se3invarint(trans=trans, rotmats=rotmats, gen_mask=gen_mask)
+        # trans, rotmats = self.rigid_to_se3invarint(trans=trans, rotmats=rotmats, gen_mask=gen_mask)
         curr_rigids = du.create_rigid(rotmats, trans)
         
 
@@ -284,9 +264,9 @@ class VQPAEBlock(nn.Module):
         str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
         
         # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
-        num_batch, num_res = batch["seqs"].shape
-        angles = batch["angles"] * node_mask[..., None]
-        mu = torch.cat([mu, str_vec, self.angles_embedder(angles).reshape(num_batch,num_res,-1)], dim=-1)
+        # num_batch, num_res = batch["seqs"].shape
+        # angles = batch["angles"] * node_mask[..., None]
+        mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, gen_mask
     
@@ -300,22 +280,32 @@ class VQPAEBlock(nn.Module):
         res_mask = batch['res_mask']
         edge_embed = batch['edge_embed'] 
         
-        need_poc = mode == "pep_given_poc"
         poc_mask = torch.logical_and(node_mask, 1-generate_mask)
         
         if mode == "pep_given_poc":
             edge_mask_poc = poc_mask[:, None] * poc_mask[:, :, None]
             edge_embed = edge_embed * edge_mask_poc[..., None]
-        else:
+            generate_mask = generate_mask
+            need_poc = True
+        elif mode == 'poc':
+            generate_mask = poc_mask
+            need_poc = False
             edge_embed = torch.zeros_like(edge_embed)
+            
+        elif mode == 'poc_and_pep':
+            edge_embed = torch.zeros_like(edge_embed)
+            generate_mask = res_mask
+            need_poc = False
+            
+        else:
+            raise ValueError(f"Invalid mode: {mode}")
         
         curr_rigids = du.create_rigid(batch['rotmats'], batch['trans'])
         
-        generate_mask = generate_mask if need_poc else res_mask
         
         fea = node_embed[..., :self._ipa_conf.c_s]
         str_fea = node_embed[..., self._ipa_conf.c_s:self._ipa_conf.c_s+6]
-        angle_fea = node_embed[..., -self.angle_dim:]
+        # angle_fea = node_embed[..., -self.angle_dim:]
         
         node_embed = fea
         
@@ -328,16 +318,15 @@ class VQPAEBlock(nn.Module):
         if need_poc:
             ## Fix the Pocket Features
             node_embed[poc_mask] += node_emb_raw[poc_mask]
-        # node_embed = node_embed[..., :-6] * node_mask[..., None]
         
         
-        node_embed = node_embed + self.angle_fuese_net(angle_fea)
+        # node_embed = node_embed + self.angle_fuese_net(angle_fea)
         node_embed, _, curr_rigids = self._process_trunk(
             'decoder', node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask=generate_mask)
         
         # 输出预测
         pred_seqs = self.seq_net(node_embed)
-        pred_angles = self.angle_net(node_embed) + self.angle_res(angle_fea)
+        pred_angles = self.angle_net(node_embed)
         pred_angles = pred_angles % (2*math.pi) 
         pred_trans = curr_rigids.get_trans()
         pred_rotmats = curr_rigids.get_rots().get_rot_mats()
@@ -358,7 +347,92 @@ class VQPAEBlock(nn.Module):
             'pred_angles': pred_angles,
             'pred_trans': pred_trans,
         }
+            
+    
+    
+    def extract_batch_gen(self, batch, gen_mask=None):
+        batch_gen = {}
+        if gen_mask is None : gen_mask = batch['generate_mask']
+        edge_mask_gen = gen_mask[:, None] * gen_mask[:, :, None]
+        gen_mask, edge_mask_gen = gen_mask.bool(), edge_mask_gen.bool()
+        for key, value in batch.items():
+            if key in ["edge_embed", "generated_mask"]:
+                continue
+            value_list = [value[i][gen_mask[i]] for i in range(value.shape[0])]
+            value_tensor = pad_sequence(value_list, batch_first=True, padding_value=0.)
+            batch_gen[key] = value_tensor
         
+        gen_mask_list = [gen_mask[i][gen_mask[i]] for i in range(value.shape[0])]
+        gen_mask_sm = pad_sequence(gen_mask_list, batch_first=True, padding_value=0.)
+        batch_gen['generate_mask'] = gen_mask_sm
+        
+        if  "edge_embed" in batch.keys():
+            max_num_gen = gen_mask.sum(dim=1).max().item()
+            edge_mask_sm = gen_mask_sm[:, None] * gen_mask_sm[:, :, None]
+            batch_gen['edge_embed'] = torch.zeros(gen_mask.size(0), max_num_gen, max_num_gen, batch['edge_embed'].size(-1), device=gen_mask.device)
+            batch_gen['edge_embed'][edge_mask_sm.bool()] = batch['edge_embed'][edge_mask_gen]
+        return batch_gen
+    
+    
+    def rigid_to_se3invarint(self,rigid=None, gen_mask=None, trans=None, rotmats=None):
+        if rigid is not None:
+            trans = rigid.get_trans()
+            rotmats = rigid.get_rots().get_rot_mats()
+        
+        batch_gen = self.extract_batch_gen({
+            "trans": trans, "rotmats": rotmats, "generate_mask": gen_mask,
+        })
+        # rot_clean = batch_gen['rotmats'][:, :-1].transpose(-1, -2) @ batch_gen['rotmats'][:, 1:]
+        # trans_clean = batch_gen['trans'][:, :-1] - batch_gen['trans'][:, 1:]
+        
+        
+        # rot_anchor = batch_gen['rotmats'][:, 0]
+        # trans_anchor = batch_gen['trans'][:, 0]
+        rot_clean = batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ batch_gen['rotmats']
+        trans_clean = (batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ batch_gen['trans'].unsqueeze(-1)).squeeze(-1)
+
+        # (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
+
+        # batch_gen['rotmats'][:, 0] =  rot_anchor.transpose(-1, -2) @ rot_anchor
+        # batch_gen['trans'][:, 0] = trans_anchor - trans_anchor
+        
+        trans[gen_mask.bool()] = trans_clean[batch_gen['generate_mask'].bool()]
+        rotmats[gen_mask.bool()] = rot_clean[batch_gen['generate_mask'].bool()]
+        
+        return trans, rotmats
+    
+    def contex_filter(self, curr_rigids, poc_mask, res_mask, gen_mask, need_poc=False, hidden_str=None):
+        """获取空刚体"""
+        B, L = poc_mask.shape
+        res_mask = res_mask.bool()
+        gen_mask = gen_mask.bool()
+        
+        rotmats = torch.eye(3, device=poc_mask.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
+        trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
+        
+        if hidden_str is not None:
+            rotmats = so3_utils.rotvec_to_rotmat(hidden_str[..., :-3].clone())
+            # rotmats[gen_mask] =hidden_str[..., :-3].view(gen_mask.size(0), gen_mask.size(1), 3, 3)[gen_mask]
+            trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
+            # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
+            
+            # batch_gen = self.extrct_batch_gen({
+            # 'rotmats': curr_rigids.get_rots().get_rot_mats(), 
+            # 'generate_mask': gen_mask,
+            # 'pred_rotmats': rotmats,
+            # 'pred_trans': trans})
+            # batch_gen['pred_rotmats'] = batch_gen['rotmats'][:, 0:1] @ batch_gen['pred_rotmats']
+            # batch_gen['pred_trans'] = (batch_gen['rotmats'][:, 0:1] @ batch_gen['pred_trans'].unsqueeze(-1)).squeeze(-1)
+            # rotmats[gen_mask.bool()] = batch_gen['pred_rotmats'][batch_gen['generate_mask'].bool()]
+            # trans[gen_mask.bool()] = batch_gen['pred_trans'][batch_gen['generate_mask'].bool()]
+        
+        if need_poc:
+            rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]
+            trans[poc_mask] = curr_rigids.get_trans()[poc_mask]
+        
+        return du.create_rigid(rotmats, trans)
+    
+    
     def before_quntized(self, node_embed, gen_mask):
         gen_mask = gen_mask.bool()
         nodes_list = [node_embed[i][gen_mask[i]] for i in range(node_embed.shape[0])]
@@ -376,6 +450,36 @@ class VQPAEBlock(nn.Module):
             nodes=nodes, to_sizes=original_sizes, padding_size=gen_mask.size(1), gen_mask=gen_mask.bool(),
         ) # B, max_nodes, C
         return quantized
+
+
+    def interpolate_batch(self, nodes: Tuple[torch.Tensor] | torch.Tensor, to_sizes: List[int] | int, padding_size: int = None, gen_mask: torch.Tensor = None):
+        '''
+        Interpolate all graphs to desired sizes.
+        If sizes are different, add padding.
+        '''
+        # Interpolate all graphs to desired sizes
+        
+        if isinstance(nodes, torch.Tensor):
+            assert isinstance(to_sizes, int)
+            return F.interpolate(nodes.permute(0, 2, 1), size=to_sizes, mode='linear').permute(0, 2, 1)
+        
+        
+        interpolated_nodes = []
+        for idx, (node, size) in enumerate(zip(nodes, to_sizes)):
+            if len(node.shape) < 3: node = node.unsqueeze(0)
+            node = node.transpose(1, 2)
+            node = F.interpolate(node, size=(size if isinstance(size, int) else size.item()), mode='linear')
+            node = node.transpose(1, 2).squeeze(0)
+
+            # # Add padding if necessary 
+            if padding_size is not None:
+                padded = torch.zeros(padding_size, node.size(1), device=node.device)
+                padded[gen_mask[idx]] = node
+                node = padded
+                
+            interpolated_nodes.append(node)
+            
+        return torch.stack(interpolated_nodes, dim=0)
     
     
     def fea_fusion(self, batch, node_mask=None):
@@ -391,39 +495,10 @@ class VQPAEBlock(nn.Module):
             self.current_seq_embedder(seqs),
             self.angles_embedder(angles).reshape(num_batch,num_res,-1)
             ],dim=-1))
-        
-        # node_embed = self.str_fea_fusion(
-        #     node_embed, 
-        #     batch['rotmats'], batch['trans'], 
-        #     node_mask,
-        #     batch['generate_mask'],
-        #     )
+    
         return node_embed + batch['node_embed']
     
-        
-    def forward(self, batch:Dict[str, torch.Tensor], mode="poc_and_pep", sampling=False):
-        """
-            batch contains: rotmats, trans, angles, seqs, node_embed, 
-                edge_embed, generate_mask, res_mask
-        Returns:
-            _type_: _description_
-        """
-        # node_emb_raw = batch['node_embed']
-        node_embed_sm, gen_mask_sm = self.encoder_step(batch, mode)
-        quantized = self.before_quntized(node_embed_sm, gen_mask=gen_mask_sm) # TODO Add more choices for gen_mask
-        
-        quantized, commitment_loss, q_latent_loss, div_loss = self.quantizer(quantized, sampling=sampling)
-        
-        quantized = self.after_quntized(quantized, gen_mask=batch['generate_mask'])
-        
-        res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
-        res['commitment_loss'] = commitment_loss
-        res['q_latent_loss'] = q_latent_loss
-        res['div_loss'] = div_loss
 
-        return res
-
-    
     
     def forward_init(self, batch:Dict[str, torch.Tensor], mode):
         
@@ -487,114 +562,17 @@ class VQPAEBlock(nn.Module):
         return self.quantizer.f_to_idxBl(interpolated_nodes)
     
     def poc_to_idxBl(self, batch) -> List:
-       
-        node_mask = torch.logical_and(batch["res_mask"], 1-batch["generate_mask"]).float()
         
-        gen_mask =  node_mask
-        rotmats = batch['rotmats'] * node_mask[..., None, None]
-        trans = batch['trans'] * node_mask[..., None]
-        edge_mask = node_mask[:, None] * node_mask[:, :, None]
-
-        node_embed = batch['node_embed'] * node_mask[..., None]
-        x = node_embed
-        
-        # rotmats = rotmats[:, 0:1].transpose(-1, -2) @ rotmats
-        # trans = (rotmats[:, :1].mT @ trans.unsqueeze(-1)).squeeze(-1)
-        
-        batch_gen = self.extrct_batch_gen(batch)
-        rotmats = batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @ rotmats
-        trans = (batch_gen['rotmats'][:, 0:1].transpose(-1, -2) @  trans.unsqueeze(-1)).squeeze(-1)
-    
-        curr_rigids = du.create_rigid(rotmats, trans)
-        
-        rigids : ru.Rigid = None
-        node_embed, edge_embed, rigids = self._process_trunk(
-            'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=gen_mask)
-        
-        
-        mu = self.mu_prj(node_embed + self.edge_to_node(edge_embed).mean(dim=-2))
-        mu = mu * node_mask[..., None]
-        mu = x + mu
-        
-        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
-        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
-        
-        num_batch, num_res = batch["seqs"].shape
-        angles = batch["angles"] * node_mask[..., None]
-        mu = torch.cat([mu, str_vec, self.angles_embedder(angles).reshape(num_batch,num_res,-1)], dim=-1)
-        
-        interpolated_nodes = self.before_quntized(mu, gen_mask=gen_mask)
+        node_embed, mask = self.encoder_step(batch, mode='poc')
+        interpolated_nodes = self.before_quntized(node_embed, gen_mask=mask)
 
         return self.quantizer.f_to_idxBl(interpolated_nodes)
     
     def fhat_to_graph(self, f_hat, batch, mode):
-    
         quantized = self.after_quntized(f_hat, gen_mask=batch['generate_mask'])    
         res = self.decoder_step(quantized=quantized, batch=batch, mode=mode)
-
-        batch_gen = self.extrct_batch_gen({
-            'rotmats': batch['rotmats'], 
-            'generate_mask': batch['generate_mask'],
-            'pred_rotmats': res['pred_rotmats'],
-            'pred_trans': res['pred_trans']})
-        batch_gen['pred_rotmats'] = batch_gen['rotmats'][:, 0:1] @ batch_gen['pred_rotmats']
-        batch_gen['pred_trans'] = (batch_gen['rotmats'][:, 0:1] @ batch_gen['pred_trans'].unsqueeze(-1)).squeeze(-1)
-        res['pred_rotmats'][batch['generate_mask'].bool()] = batch_gen['pred_rotmats'][batch_gen['generate_mask'].bool()]
-        res['pred_trans'][batch['generate_mask'].bool()] = batch_gen['pred_trans'][batch_gen['generate_mask'].bool()]
         
         return res
-
-
-    
-    def interpolate_batch(self, nodes: Tuple[torch.Tensor] | torch.Tensor, to_sizes: List[int] | int, padding_size: int = None, gen_mask: torch.Tensor = None):
-        '''
-        Interpolate all graphs to desired sizes.
-        If sizes are different, add padding.
-        '''
-        # Interpolate all graphs to desired sizes
-        
-        if isinstance(nodes, torch.Tensor):
-            assert isinstance(to_sizes, int)
-            return F.interpolate(nodes.permute(0, 2, 1), size=to_sizes, mode='linear').permute(0, 2, 1)
-        
-        
-        interpolated_nodes = []
-        for idx, (node, size) in enumerate(zip(nodes, to_sizes)):
-            if len(node.shape) < 3: node = node.unsqueeze(0)
-            node = node.transpose(1, 2)
-            node = F.interpolate(node, size=(size if isinstance(size, int) else size.item()), mode='linear')
-            node = node.transpose(1, 2).squeeze(0)
-
-            # # Add padding if necessary 
-            if padding_size is not None:
-                padded = torch.zeros(padding_size, node.size(1), device=node.device)
-                padded[gen_mask[idx]] = node
-                node = padded
-                
-            interpolated_nodes.append(node)
-            
-        return torch.stack(interpolated_nodes, dim=0)
-    
-    def contex_filter(self, curr_rigids, poc_mask, res_mask, gen_mask, need_poc=False, hidden_str=None):
-        """获取空刚体"""
-        B, L = poc_mask.shape
-        res_mask = res_mask.bool()
-        gen_mask = gen_mask.bool()
-        
-        rotmats = torch.eye(3, device=poc_mask.device).unsqueeze(0).unsqueeze(0).repeat(B, L, 1, 1)
-        trans = torch.zeros(B, L, 3, device=poc_mask.device, dtype=torch.float)
-        
-        if hidden_str is not None:
-            rotmats = so3_utils.rotvec_to_rotmat(hidden_str[..., :-3].clone())
-            # rotmats[gen_mask] =hidden_str[..., :-3].view(gen_mask.size(0), gen_mask.size(1), 3, 3)[gen_mask]
-            trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
-            # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
-        
-        if need_poc:
-            rotmats[poc_mask] = curr_rigids.get_rots().get_rot_mats()[poc_mask]
-            trans[poc_mask] = curr_rigids.get_trans()[poc_mask]
-        
-        return du.create_rigid(rotmats, trans)
     
     
 def reparameterize(mu, logvar):
@@ -613,51 +591,51 @@ def sizes_to_mask(original_sizes, max_size, device):
 
 
 
-class FeaFusionLayer(nn.Module):
-    def __init__(self, ipa_conf):
-        super().__init__()
-        self._ipa_conf = ipa_conf
-        self.rot_net = nn.Sequential(
-            nn.Linear(3, self._ipa_conf.c_s),
-            nn.LayerNorm(self._ipa_conf.c_s),
-            nn.GELU(),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
-        )
-        self.dist_net = nn.Sequential(
-            nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
-            nn.LayerNorm(self._ipa_conf.c_s),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.LayerNorm(self._ipa_conf.c_s),
-            nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
-        )
+# class FeaFusionLayer(nn.Module):
+#     def __init__(self, ipa_conf):
+#         super().__init__()
+#         self._ipa_conf = ipa_conf
+#         self.rot_net = nn.Sequential(
+#             nn.Linear(3, self._ipa_conf.c_s),
+#             nn.LayerNorm(self._ipa_conf.c_s),
+#             nn.GELU(),
+#             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s)
+#         )
+#         self.dist_net = nn.Sequential(
+#             nn.Linear(3, self._ipa_conf.c_s),nn.ReLU(),
+#             nn.LayerNorm(self._ipa_conf.c_s),
+#             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
+#             nn.LayerNorm(self._ipa_conf.c_s),
+#             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
+#         )
         
-        self.fusion = nn.Sequential(
-            nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s*2),
-            nn.LayerNorm(self._ipa_conf.c_s*2),
-            nn.GELU(),
-            nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s),
-            # nn.LayerNorm(self._ipa_conf.c_s),
-            # nn.ReLU(),
-            # nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
-        )
+#         self.fusion = nn.Sequential(
+#             nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s*2),
+#             nn.LayerNorm(self._ipa_conf.c_s*2),
+#             nn.GELU(),
+#             nn.Linear(self._ipa_conf.c_s*2, self._ipa_conf.c_s),
+#             # nn.LayerNorm(self._ipa_conf.c_s),
+#             # nn.ReLU(),
+#             # nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),
+#         )
         
-    def forward(self, node_emb, rot, trans, node_mask, gen_mask):
-        # rot = rigid.get_rots().get_rot_mats()
-        rot = so3_utils.rotmat_to_rotvec(rot)
-        rot = self.rot_net(rot)
-        # trans = rigid.get_trans() # B, L, 3
-        # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
-        # edge_mask = node_mask[:, None] * node_mask[:, :, None]
-        # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
-        trans = (trans * gen_mask[..., None]) / gen_mask[..., None].sum(dim=1, keepdim=True)
-        node_emb_ = self.fusion(torch.cat(
-            [node_emb, rot], dim=-1
-        ))
-        node_emb = node_emb_ + node_emb
+#     def forward(self, node_emb, rot, trans, node_mask, gen_mask):
+#         # rot = rigid.get_rots().get_rot_mats()
+#         rot = so3_utils.rotmat_to_rotvec(rot)
+#         rot = self.rot_net(rot)
+#         # trans = rigid.get_trans() # B, L, 3
+#         # dist = (trans[:, None, :, :] - trans[:, :, None, :]).norm(dim=-1, p=2)
+#         # edge_mask = node_mask[:, None] * node_mask[:, :, None]
+#         # dist = self.dist_net(dist[..., None]/10.0) * edge_mask[..., None]
+#         trans = (trans * gen_mask[..., None]) / gen_mask[..., None].sum(dim=1, keepdim=True)
+#         node_emb_ = self.fusion(torch.cat(
+#             [node_emb, rot], dim=-1
+#         ))
+#         node_emb = node_emb_ + node_emb
         
-        # edge_emb = edge_emb + dist
+#         # edge_emb = edge_emb + dist
         
-        return node_emb * node_mask[..., None]
+#         return node_emb * node_mask[..., None]
         
 # def local_transform(coords):
 #     # 取前三个残基定义局部坐标系
