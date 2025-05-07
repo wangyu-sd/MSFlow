@@ -71,9 +71,8 @@ class VQPAE(nn.Module):
             seqs_1 = batch['aa']
             context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
             trans_1, rotmats_1 = align_to_principal_axis(trans_1, rotmats_1, context_mask)
-
-
-        angles_1 = batch['torsion_angle']
+            angles_1 = batch['torsion_angle']
+            poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
         # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
         # structure_mask = context_mask 
         # sequence_mask = context_mask
@@ -83,7 +82,7 @@ class VQPAE(nn.Module):
         # trans_1, _ = self.zero_center_part(trans_1, res_mask, res_mask)
         # trans_1 = (rotmats_1.unsqueeze(1) @ trans_1.transpose(-1, -2)).transpose(-1, -2)n
     
-        poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
+            
         node_embed = self.node_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 
                                         batch['mask_heavyatom'], structure_mask=poc_mask, sequence_mask=poc_mask)
         edge_embed = self.edge_embedder(batch['aa'], batch['res_nb'], batch['chain_nb'], batch['pos_heavyatom'], 

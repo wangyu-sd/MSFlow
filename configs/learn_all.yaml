@@ -1,10 +1,10 @@
 model:
   encoder:
     node_embed_size: 128
-    edge_embed_size: 64
+    edge_embed_size: 32
     ipa:
       c_s: 128 #${model.node_embed_size}
-      c_z: 64 #${model.edge_embed_size}
+      c_z: 32 #${model.edge_embed_size}
       c_hidden: 128
       no_heads: 8
       no_qk_points: 8
