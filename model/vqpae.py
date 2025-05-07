@@ -125,32 +125,6 @@ class VQPAE(nn.Module):
         return pos, center
     
     
-    # def fape_loss(self, pred_coords, true_coords, mask):
-    #     # pred_coords: [B, L, 3]
-    #     # true_coords: [B, L, 3]
-    #     # mask: [B, L] (有效残基掩码)
-        
-    #     # 计算局部坐标系变换
-    #     def local_transform(coords):
-    #         # 取前三个残基定义局部坐标系
-    #         v1 = coords[..., 1, :] - coords[..., 0, :]
-    #         v2 = coords[..., 2, :] - coords[..., 1, :]
-            
-    #         # v1 = v1 / torch.norm(v1, dim=-1, keepdim=True)  # [B, L, 3]
-    #         # v2 = v2 / torch.norm(v2, dim=-1, keepdim=True)  # [B, L, 3]
-    #         normal = torch.cross(v1, v2, dim=-1)
-    #         # normal = normal / torch.norm(normal, dim=-1, keepdim=True)  # [B, L, 3]
-    #         return torch.stack([v1, v2, normal], dim=-1)  # [B, 3, 3]
-        
-    #     pred_frames = local_transform(pred_coords)
-    #     true_frames = local_transform(true_coords)
-        
-    #     # 计算变换后的坐标差异
-    #     diff = torch.bmm(pred_coords, pred_frames) - torch.bmm(true_coords, true_frames)
-    #     loss = diff.pow(2) * mask[..., None]  # [B, L, 3]
-    #     loss = loss / (mask.sum(-1, keepdim=True) + 1e-8)[..., None]  # [B, L, 3]
-    #     return loss.sum()
-    
     
     def get_loss(self, res, fea_dict, mode, weigeht=1.):
         pred_trans, pred_rotmats, pred_angles, pred_seqs_prob = \
@@ -287,8 +261,8 @@ class VQPAE(nn.Module):
             all_loss = self.get_loss(res, fea_dict, "all")
             
         elif mode == "pep_or_poc":
-            # res = self.vqvae(fea_dict, mode="poc")
-            # poc_loss = self.get_loss(res, fea_dict, "poc", weigeht=0.1)
+            res = self.vqvae(fea_dict, mode="poc")
+            poc_loss = self.get_loss(res, fea_dict, "poc", weigeht=0.1)
             
             res_pep = self.vqvae(fea_dict, mode="pep_given_poc")
             pep_loss = self.get_loss(res_pep, fea_dict, "pep")

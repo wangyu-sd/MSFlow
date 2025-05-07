@@ -414,7 +414,7 @@ class VQPAEBlock(nn.Module):
             rotmats = so3_utils.rotvec_to_rotmat(hidden_str[..., :-3].clone())
             # rotmats[gen_mask] =hidden_str[..., :-3].view(gen_mask.size(0), gen_mask.size(1), 3, 3)[gen_mask]
             trans = torch.where(gen_mask.unsqueeze(-1), hidden_str[..., -3:], trans)
-            # trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
+            trans[gen_mask] = hidden_str[:, :, -3:][gen_mask]
             
             # batch_gen = self.extrct_batch_gen({
             # 'rotmats': curr_rigids.get_rots().get_rot_mats(), 
