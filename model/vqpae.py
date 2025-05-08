@@ -261,8 +261,8 @@ class VQPAE(nn.Module):
             all_loss = self.get_loss(res, fea_dict, "all")
             
         elif mode == "pep_or_poc":
-            res = self.vqvae(fea_dict, mode="poc")
-            poc_loss = self.get_loss(res, fea_dict, "poc", weigeht=0.05)
+            # res = self.vqvae(fea_dict, mode="poc")
+            # poc_loss = self.get_loss(res, fea_dict, "poc", weigeht=0.05)
             
             res_pep = self.vqvae(fea_dict, mode="pep_given_poc")
             pep_loss = self.get_loss(res_pep, fea_dict, "pep")
