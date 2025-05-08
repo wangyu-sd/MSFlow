@@ -11,7 +11,7 @@ model:
       no_v_points: 8
       seq_tfmr_num_heads: 4
       seq_tfmr_num_layers: 2
-      num_encoder_blocks: 4
+      num_encoder_blocks: 3
       num_decoder_blocks: 4
       stop_grad: False
       codebook_size: 512
