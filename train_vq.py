@@ -37,8 +37,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
     # parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-0338939]_2025_05_04__07_58_40/checkpoints/3971_last.pt")
-    parser.add_argument('--resume', type=str, default=None)
-    # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-28553e6]_2025_05_02__16_48_06/checkpoints/145755_last.pt")
+    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/24119_last.pt")
+    # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/24119_last.pt")
     parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
@@ -118,7 +118,7 @@ if __name__ == '__main__':
         logger.info('Resuming from checkpoint: %s' % args.resume)
         ckpt = torch.load(args.resume, map_location=args.device)
         it_first = ckpt['iteration']  # + 1
-        ckpt['model']['vqvae.quantizer.collected_samples'] = model.vqvae.quantizer.collected_samples
+        model.vqvae.quantizer.collected_samples = ckpt['model']['vqvae.quantizer.collected_samples']
         model.load_state_dict(ckpt['model'])
         logger.info('Resuming optimizer states...')
         optimizer.load_state_dict(ckpt['optimizer'])
