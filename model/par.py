@@ -115,10 +115,11 @@ class PAR(nn.Module):
             poc_idx_Bl, _ = self.vqpae.vqvae.poc_to_idxBl(batch_fea)
             
             gt_Bl = torch.cat(gt_idx_Bl, dim=1)
-            poc_Bl = torch.cat(poc_idx_Bl, dim=1)
+            # poc_Bl = torch.cat(poc_idx_Bl, dim=1)
             
             # gt_fea = self.vae_quant_proxy[0].embedding[gt_Bl]   # B, l, Cvae
-            poc_context = self.vae_quant_proxy[0].embedding[poc_Bl] # TODO 
+            # poc_context = self.vae_quant_proxy[0].embedding[poc_Bl] # TODO 
+            poc_context = self.vae_quant_proxy[0].idxBl_to_var_context(poc_idx_Bl)
             
             x_BLCv_wo_first_l = self.vae_quant_proxy[0].idxBl_to_var_input(gt_idx_Bl)
             poc_cond = self.get_poc_cond(batch_fea)
@@ -174,8 +175,8 @@ class PAR(nn.Module):
         poc_cond = self.get_poc_cond(batch_fea)
         poc_idx_Bl, _ = self.vqpae.vqvae.poc_to_idxBl(batch_fea)
         # gt_Bl = torch.cat(gt_idx_Bl, dim=1)
-        poc_Bl = torch.cat(poc_idx_Bl, dim=1)
-        poc_context = self.vae_quant_proxy[0].embedding[poc_Bl]
+        # poc_Bl = torch.cat(poc_idx_Bl, dim=1)
+        poc_context = self.vae_quant_proxy[0].idxBl_to_var_context(poc_idx_Bl)
         poc_context = self.word_embed(poc_context.float())
         poc_context =  poc_context + self.lvl_embed(self.lvl_1L.expand(B, -1)) + self.pos_1LC 
         
