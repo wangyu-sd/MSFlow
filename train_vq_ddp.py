@@ -73,6 +73,7 @@ if __name__ == '__main__':
         print(f"当前使用GPU: {torch.cuda.current_device()}")  
 
     # Logging
+    log_dir = None
     if args.debug or local_rank > 0:
         logger = get_logger('train', None, local_rank)
         writer = BlackHole()
@@ -147,7 +148,7 @@ if __name__ == '__main__':
         model.module.load_state_dict(ckpt['model'], strict=False)
         logger.info('Done!')
     
-    if not args.debug:
+    if not args.debug and log_dir is not None:
         print("Current Loger Dir: %s" % log_dir)
     scaler = torch.amp.GradScaler()
     def train(it, mode):
