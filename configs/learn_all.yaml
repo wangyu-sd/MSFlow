@@ -1,9 +1,9 @@
 model:
   encoder:
-    node_embed_size: 8
+    node_embed_size: 256
     edge_embed_size: 32
     ipa:
-      c_s: 8 #${model.node_embed_size}
+      c_s: 256 #${model.node_embed_size}
       c_z: 32 #${model.edge_embed_size}
       c_hidden: 128
       no_heads: 8
@@ -14,7 +14,7 @@ model:
       num_encoder_blocks: 3
       num_decoder_blocks: 4
       stop_grad: False
-      codebook_size: 128
+      codebook_size: 256
       # codebook_dim: 32
       commitment_cost: 0.25
       init_steps: 50000
