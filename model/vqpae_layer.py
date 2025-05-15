@@ -118,18 +118,20 @@ class VQPAEBlock(nn.Module):
         trunk[f'node_transition_{b}'] = ipa_pytorch.StructureModuleTransition(
             c=self._ipa_conf.c_s)
         
-        trunk[f'bb_update_{b}'] = ipa_pytorch.BackboneUpdate(
-            self._ipa_conf.c_s, use_rot_updates=True)
+        if is_encoder and b < num_blocks-1 or not is_encoder:
+            trunk[f'bb_update_{b}'] = ipa_pytorch.BackboneUpdate(
+                self._ipa_conf.c_s, use_rot_updates=True)
         # trunk[f'fea_fusion_{b}'] = FeaFusionLayer(self._ipa_conf)
 
 
         # No edge update on the last block.
         edge_in = self._ipa_conf.c_z
-        trunk[f'edge_transition_{b}'] = ipa_pytorch.EdgeTransition(
-            node_embed_size=self._ipa_conf.c_s,
-            edge_embed_in=edge_in,
-            edge_embed_out=self._ipa_conf.c_z,
-        )
+        if is_encoder or b < num_blocks-1:
+            trunk[f'edge_transition_{b}'] = ipa_pytorch.EdgeTransition(
+                node_embed_size=self._ipa_conf.c_s,
+                edge_embed_in=edge_in,
+                edge_embed_out=self._ipa_conf.c_z,
+            )
             
 
     def _process_trunk(self, trunk_type, node_embed, edge_embed, curr_rigids, node_mask, edge_mask, gen_mask):
@@ -160,21 +162,21 @@ class VQPAEBlock(nn.Module):
                 #         node_embed * node_mask[..., None])
                 
                 
-                # if trunk_type == 'decoder' or b < num_blocks-1:
-                rigid_update = trunk[f'bb_update_{b}'](
-                    node_embed * node_mask[..., None])
-                curr_rigids = curr_rigids.compose_q_update_vec(
-                    rigid_update, node_mask[..., None])
+                if trunk_type == 'decoder' or b < num_blocks-1:
+                    rigid_update = trunk[f'bb_update_{b}'](
+                        node_embed * node_mask[..., None])
+                    curr_rigids = curr_rigids.compose_q_update_vec(
+                        rigid_update, node_mask[..., None])
                 
                 # rot = curr_rigids.get_rots().get_rot_mats()
                 # trans = curr_rigids.get_trans()
                 # node_embed = trunk[f'fea_fusion_{b}'](
                 #     node_embed, rot, trans, node_mask, gen_mask)
                 
-
-                edge_embed = trunk[f'edge_transition_{b}'](
-                    node_embed, edge_embed)
-                edge_embed *= edge_mask[..., None]
+                if trunk_type == 'decoder' and b < num_blocks-1 or trunk_type == 'encoder':
+                    edge_embed = trunk[f'edge_transition_{b}'](
+                        node_embed, edge_embed)
+                    edge_embed *= edge_mask[..., None]
 
                 
                 node_embed = x + node_embed * node_mask[..., None]
@@ -261,7 +263,7 @@ class VQPAEBlock(nn.Module):
         # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
         # num_batch, num_res = batch["seqs"].shape
         # angles = batch["angles"] * node_mask[..., None]
-        mu = torch.cat(mu, dim=-1)
+        # mu = torch.cat(mu, dim=-1)
         
         return mu, gen_mask
     
@@ -307,7 +309,7 @@ class VQPAEBlock(nn.Module):
         
         curr_rigids = self.contex_filter(
             curr_rigids, poc_mask, res_mask, generate_mask, 
-            need_poc=need_poc, hidden_str=False,
+            need_poc=need_poc, hidden_str=None,
             )
         
         if need_poc:

@@ -44,7 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
-    parser.add_argument('--local-rank', type=int, help='Local rank. Necessary for using the torch.distributed.launch utility.')
+    # parser.add_argument('--local-rank', type=int, help='Local rank. Necessary for using the torch.distributed.launch utility.')
     args = parser.parse_args()
 
     args.name = args.name
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     seed_all(config.train.seed)
     config['device'] = args.device
     
-    local_rank = args.local_rank
+    local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
     if local_rank == 0:
         print(f"可见GPU: {torch.cuda.device_count()}张")  # 应输出4
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     val_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
     train_sampler = DistributedSampler(train_dataset, shuffle=True)
-    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True, sampler=DistributedSampler)
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, collate_fn=PaddingCollate(), sampler=train_sampler, num_workers=args.num_workers, pin_memory=True)
     train_iterator = inf_iterator(train_loader)
     val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     len_train_dataset = len(train_dataset)
@@ -117,7 +117,7 @@ if __name__ == '__main__':
     # Model
     logger.info('Building model...')
     # model = get_model(config.model).to(args.device)
-    model = DDP(VQPAE(config.model).to(local_rank, device_ids=[local_rank]))
+    model = DDP(VQPAE(config.model).cuda(), device_ids=[local_rank])
     # DDP(FlowModel(config.model).to(local_rank), device_ids=[local_rank])
     # wandb.watch(model,log='all',log_freq=1)
     logger.info(f'Number of parameters for model: {count_parameters(model)*1e-7:.2f}M')
@@ -133,8 +133,8 @@ if __name__ == '__main__':
         logger.info('Resuming from checkpoint: %s' % args.resume)
         ckpt = torch.load(args.resume, map_location=f'cuda:{local_rank}', weights_only=True)
         it_first = ckpt['iteration']  # + 1
-        model.vqvae.quantizer.collected_samples = ckpt['model']['vqvae.quantizer.collected_samples']
-        model.load_state_dict(ckpt['model'])
+        model.module.vqvae.quantizer.collected_samples = ckpt['model']['vqvae.quantizer.collected_samples']
+        model.module.load_state_dict(ckpt['model'])
         logger.info('Resuming optimizer states...')
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
@@ -144,7 +144,7 @@ if __name__ == '__main__':
         logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
         ckpt = torch.load(args.from_pretrain, map_location=args.device, weights_only=True)
         logger.info(f'Loading pretrain model states from {args.from_pretrain}')
-        model.load_state_dict(ckpt['model'], strict=False)
+        model.module.load_state_dict(ckpt['model'], strict=False)
         logger.info('Done!')
     
     if not args.debug:
@@ -176,7 +176,7 @@ if __name__ == '__main__':
         scaler.scale(loss).backward()
 
         # rescue for nan grad
-        for param in model.parameters():
+        for param in model.module.parameters():
             if param.grad is not None:
                 if torch.isnan(param.grad).any():
                     param.grad[torch.isnan(param.grad)] = 0
@@ -195,7 +195,7 @@ if __name__ == '__main__':
             # Logging
             scalar_dict = {}
             # scalar_dict.update(metric_dict['scalar'])
-            u_count = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+            u_count = model.module.vqvae.quantizer.batch_counts.detach().cpu().numpy()
             u_prob = u_count / u_count.sum()
             u_rate = (u_prob >= 1 / config.model.encoder.ipa.codebook_size / 10).sum() / u_count.shape[0]
             scalar_dict.update({
@@ -209,14 +209,14 @@ if __name__ == '__main__':
                 to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
                 log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger, to_log=to_log)
             elif it == 100:
-                model.vqvae.quantizer.cluster_reset()
+                model.module.vqvae.quantizer.cluster_reset()
             if it % (len_train_dataset // config.train.batch_size * 10) == 0:
-                coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+                coodbook_cnt = model.module.vqvae.quantizer.batch_counts.detach().cpu().numpy()
                 if not args.debug:
                     plot_codebook_dist(coodbook_cnt, log_dir, it)
-                model.vqvae.quantizer.reset_counts()
+                model.module.vqvae.quantizer.reset_counts()
             elif it % (len_train_dataset // config.train.batch_size) == 0:
-                model.vqvae.quantizer.reset_counts()
+                model.module.vqvae.quantizer.reset_counts()
             
 
     def validate(it, mode):
@@ -262,15 +262,15 @@ if __name__ == '__main__':
     try:
         for it in range(it_first, config.train.max_iters + 1):
             
-            if model.vqvae.quantizer.init_steps >= 0 and args.codebook_init:
+            if model.module.vqvae.quantizer.init_steps >= 0 and args.codebook_init:
                 if it == 1:
                     logger.info('Starting Initialisation Phase 1...')
-                if model.vqvae.quantizer.init_steps == 1:
+                if model.module.vqvae.quantizer.init_steps == 1:
                     logger.info('Starting Initialisation Phase 2...')
                     
                 train(it, mode='codebook')
                 
-                if model.vqvae.quantizer.init_steps <= 0 and not model.vqvae.quantizer.collect_phase:
+                if model.module.vqvae.quantizer.init_steps <= 0 and not model.module.vqvae.quantizer.collect_phase:
                     logger.info('Saving models...')
                     ckpt_path = os.path.join(ckpt_dir, '%d_coodbook.pt' % it)
                     torch.save({
@@ -319,4 +319,5 @@ if __name__ == '__main__':
             print('Current iteration: %d' % it)
             print("Log dir:", log_dir)
             print('Last checkpoint saved to %s' % ckpt_path)
+            distrib.destroy_process_group()
         

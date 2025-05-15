@@ -160,10 +160,12 @@ if __name__ == '__main__':
         loss.backward()
 
         # rescue for nan grad
-        for param in model.parameters():
+        for p_name, param in model.named_parameters():
             if param.grad is not None:
                 if torch.isnan(param.grad).any():
                     param.grad[torch.isnan(param.grad)] = 0
+            else:
+                print("Unused param: ", p_name)
 
         orig_grad_norm = clip_grad_norm_(model.parameters(), config.train.max_grad_norm)
 
@@ -172,7 +174,8 @@ if __name__ == '__main__':
         optimizer.step()
         optimizer.zero_grad()
         time_backward_end = current_milli_time()
-
+        
+        
         # Logging
         scalar_dict = {}
         # scalar_dict.update(metric_dict['scalar'])
