@@ -216,9 +216,9 @@ class PAR(nn.Module):
             # logits_BLV = (1+t) * logits_BLV[:B] - t * logits_BLV[B:]
 
             # 
-            if si >= 0:
-                # idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
-                idx_Bl = logits_BLV.argmax(dim=-1)
+            if si >= 3:
+                idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
+                # idx_Bl = logits_BLV.argmax(dim=-1)
             else:
                 idx_Bl = gt_BL[si]
             idx_Bl_list.append(idx_Bl)
@@ -235,13 +235,13 @@ class PAR(nn.Module):
             block.cross_attn.q_caching(False)
         
         # gt_BL, h_hat_gt1 = self.vqpae.vqvae.pep_to_idxBl(batch_fea, mode='pep_given_poc')
-        gt_BL = torch.cat(gt_BL, dim=1)
-        h_gt_BL = self.vae_quant_proxy[0].embedding[gt_BL].permute(0, 2, 1)# B, l, Cvae
-        f_hat_gt = h_gt_BL.new_zeros(B, self.Cvae, self.scales[-1])
-        pn_start = 0
-        for i, pn in enumerate(self.scales):
-            f_hat_gt.add_(F.interpolate(h_gt_BL[:, :, pn_start:pn_start+pn], size=(self.scales[-1]), mode='linear'))
-            pn_start += pn
+        # gt_BL = torch.cat(gt_BL, dim=1)
+        # h_gt_BL = self.vae_quant_proxy[0].embedding[gt_BL].permute(0, 2, 1)# B, l, Cvae
+        # f_hat_gt = h_gt_BL.new_zeros(B, self.Cvae, self.scales[-1])
+        # pn_start = 0
+        # for i, pn in enumerate(self.scales):
+        #     f_hat_gt.add_(F.interpolate(h_gt_BL[:, :, pn_start:pn_start+pn], size=(self.scales[-1]), mode='linear'))
+        #     pn_start += pn
         
 
         results = self.vae_proxy[0].fhat_to_graph(f_hat.transpose(1, 2), batch_fea, mode='pep_given_poc')
@@ -249,8 +249,8 @@ class PAR(nn.Module):
     
     def postprocess(self, results, batch_fea):
         
-        loss = self.vqpae.get_loss(results, batch_fea, mode='pep', rotate=False)
-        print(loss)
+        # loss = self.vqpae.get_loss(results, batch_fea, mode='pep')
+        # print(loss)
         
         final =  {
             'rotmats': results["pred_rotmats"],

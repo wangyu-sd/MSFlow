@@ -159,11 +159,11 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
     parser.add_argument('--logdir', type=str, default="/remote-home/wangyu/VQ-PAR/log_sample")
     parser.add_argument('--debug', action='store_true', default=False)
-    parser.add_argument('--device', type=str, default='cuda:0')
+    parser.add_argument('--device', type=str, default='cuda:7')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default="/remote-home/wangyu/VQ-PAR/log_par/learn_all[main-de81ee7]_2025_05_06__10_20_30/checkpoints/90000.pt")
-    parser.add_argument('--from_pretrain', type=str, default="logs/learn_all[main-f067471]_2025_05_04__15_09_44/checkpoints/15000.pt")
+    parser.add_argument('--resume', type=str, default="log_par/learn_all[main-4b533be]_2025_05_08__10_09_34/checkpoints/45000.pt")
+    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/33778_last.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 
@@ -217,14 +217,14 @@ if __name__ == '__main__':
     logger.info('Loading datasets...')
     # train_dataset = get_dataset(config.dataset.train)
     # val_dataset = get_dataset(config.dataset.val)
-    train_dataset = PepDataset(structure_dir = config.dataset.train.structure_dir, dataset_dir = config.dataset.train.dataset_dir,
-                                            name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
+    # train_dataset = PepDataset(structure_dir = config.dataset.train.structure_dir, dataset_dir = config.dataset.train.dataset_dir,
+    #                                         name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
     val_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
-    train_iterator = inf_iterator(train_loader)
+    # train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
+    # train_iterator = inf_iterator(train_loader)
     val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
-    logger.info('Train %d | Val %d' % (len(train_dataset), len(val_dataset)))
+    logger.info('Test %d' % (len(val_dataset)))
 
     # Model
     logger.info('Building model...')
@@ -275,7 +275,7 @@ if __name__ == '__main__':
         batch = recursive_to(batch, args.device)    
         
         for sp_idx in tqdm(range(args.sample_num), desc="Generating Multiple Samples", dynamic_ncols=True):
-            final = model.autoregressive_infer_cfg(batch, cfg=0.0, top_k=5, top_p=0.0)
+            final = model.autoregressive_infer_cfg(batch, cfg=0.0, top_k=2, top_p=0.0)
             # final = model.anchor_based_infer(batch, cfg=0.0, top_k=5, top_p=0.0)
             pos_ha,_,_ = full_atom_reconstruction(R_bb=final['rotmats'],t_bb=final['trans'],angles=final['angles'],aa=final['seqs_gt'])
             pos_ha = F.pad(pos_ha, pad=(0,0,0,15-14), value=0.) # (B,L,A,3) pos14 A=14

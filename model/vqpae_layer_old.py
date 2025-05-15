@@ -59,7 +59,7 @@ class VQPAEBlock(nn.Module):
         
         self.quantizer: VectorQuantizer = VectorQuantizer(
             codebook_size=ipa_conf.codebook_size,
-            embedding_dim=self._ipa_conf.c_s,   
+            embedding_dim=self._ipa_conf.c_s + 3 + 3,   
             commitment_cost=ipa_conf.commitment_cost,
             init_steps=ipa_conf.init_steps,
             collect_desired_size=ipa_conf.collect_desired_size,
@@ -233,7 +233,7 @@ class VQPAEBlock(nn.Module):
         curr_rigids = du.create_rigid(rotmats, trans)
         
 
-        # rigids : ru.Rigid = None
+        rigids : ru.Rigid = None
         node_embed, edge_embed, rigids = self._process_trunk(
             'encoder', node_embed, batch["edge_embed"], curr_rigids, node_mask, edge_mask, gen_mask=gen_mask)
         
@@ -255,13 +255,13 @@ class VQPAEBlock(nn.Module):
         # logvar = x + logvar
         # str_vec = rigids.to_tensor_7()
         
-        # hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
-        # str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
+        hidden_rotm = so3_utils.rotmat_to_rotvec(rigids.get_rots().get_rot_mats())
+        str_vec = torch.cat([hidden_rotm, rigids.get_trans()], dim=-1)
         
         # str_vec = torch.cat([rigids.get_rots().get_rot_mats().view(x.size(0), x.size(1), 9), rigids.get_trans()], dim=-1)
         # num_batch, num_res = batch["seqs"].shape
         # angles = batch["angles"] * node_mask[..., None]
-        mu = torch.cat(mu, dim=-1)
+        mu = torch.cat([mu, str_vec], dim=-1)
         
         return mu, gen_mask
     
@@ -299,7 +299,7 @@ class VQPAEBlock(nn.Module):
         
         
         fea = node_embed[..., :self._ipa_conf.c_s]
-        # str_fea = node_embed[..., self._ipa_conf.c_s:self._ipa_conf.c_s+6]
+        str_fea = node_embed[..., self._ipa_conf.c_s:self._ipa_conf.c_s+6]
         # angle_fea = node_embed[..., -self.angle_dim:]
         
         node_embed = fea
@@ -307,7 +307,7 @@ class VQPAEBlock(nn.Module):
         
         curr_rigids = self.contex_filter(
             curr_rigids, poc_mask, res_mask, generate_mask, 
-            need_poc=need_poc, hidden_str=False,
+            need_poc=need_poc, hidden_str=str_fea,
             )
         
         if need_poc:

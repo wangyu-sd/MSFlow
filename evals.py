@@ -37,7 +37,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-cdf5f7d]_2025_04_27__18_30_16/results')
     # parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-98e0b67]_2025_04_27__21_06_12/results')
-    parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-36612ab]_2025_05_05__02_31_46/results')
+    # parser.add_argument('--eval_dir', type=str, default='/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-36612ab]_2025_05_05__02_31_46/results')
+    parser.add_argument('--eval_dir',  type=str,  default="/remote-home/wangyu/VQ-PAR/log_sample/learn_all[main-36612ab]_2025_05_05__02_31_46/results")
     args = parser.parse_args()
     
     logger_dir = args.eval_dir.replace('results', 'eval_res')

@@ -1,9 +1,9 @@
 model:
   encoder:
-    node_embed_size: 128
+    node_embed_size: 8
     edge_embed_size: 32
     ipa:
-      c_s: 128 #${model.node_embed_size}
+      c_s: 8 #${model.node_embed_size}
       c_z: 32 #${model.edge_embed_size}
       c_hidden: 128
       no_heads: 8
@@ -14,12 +14,33 @@ model:
       num_encoder_blocks: 3
       num_decoder_blocks: 4
       stop_grad: False
-      codebook_size: 512
+      codebook_size: 128
       # codebook_dim: 32
       commitment_cost: 0.25
       init_steps: 50000
       collect_desired_size: 9000
       scales: 5
+    
+  af3:
+    use_attn_pair_bias: True
+    nlayers: 6
+    token_dim: 512
+    idx_emb_dim: 64
+    t_emb_dim: 64
+    pair_repr_dim: 32
+    pair_cond_dim: 32
+    feats_init_seq: ["x_sc", "res_seq_pdb_idx"]
+    feats_cond_seq: ['time_emb']
+    xt_pair_dist_dim: 16
+    xt_pair_dist_min: 0.1
+    xt_pair_dist_max: 10.
+    dim_cond: 64
+    feats_pair_cond: ["xt_pair_dists"]
+    feats_pair_repr: ["xt_pair_dists"]
+    nheads: 8
+    residual_mha: True
+    residual_transition: True
+    parallel_mha_transition: True
 
 par:
   depth: 6

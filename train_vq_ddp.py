@@ -1,5 +1,7 @@
 import wandb
 import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 import sys
 import shutil
 import argparse
@@ -12,6 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm.auto import tqdm
 
 USE_DDP = True
+from torch.utils.data.distributed import DistributedSampler
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
@@ -43,6 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='vq_ft')
     parser.add_argument('--codebook_init', default=False, action='store_true')
+    parser.add_argument('--local-rank', type=int, help='Local rank. Necessary for using the torch.distributed.launch utility.')
     args = parser.parse_args()
 
     args.name = args.name
@@ -63,10 +67,14 @@ if __name__ == '__main__':
     config, config_name = load_config(args.config)
     seed_all(config.train.seed)
     config['device'] = args.device
+    
+    local_rank = args.local_rank
+    torch.cuda.set_device(local_rank)
 
     # Logging
-    if args.debug:
-        logger = get_logger('train', None)
+    if args.debug or local_rank > 0:
+        logger = get_logger('train', None, local_rank)
+        writer = BlackHole()
         writer = BlackHole()
     else:
         run = wandb.init(project=args.name, config=config, name='%s[%s]' % (config_name, args.tag))
@@ -86,6 +94,10 @@ if __name__ == '__main__':
             shutil.copyfile(args.config, os.path.join(log_dir, os.path.basename(args.config)))
     logger.info(args)
     logger.info(config)
+    
+    # Set up DDP
+    logger.info('Initializing DDP...')
+    distrib.init_process_group(backend="nccl")
 
     # Data
     logger.info('Loading datasets...')
@@ -95,7 +107,8 @@ if __name__ == '__main__':
                                             name = config.dataset.train.name, transform=None, reset=config.dataset.train.reset)
     val_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
+    train_sampler = DistributedSampler(train_dataset, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True, sampler=DistributedSampler)
     train_iterator = inf_iterator(train_loader)
     val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     len_train_dataset = len(train_dataset)
@@ -104,7 +117,8 @@ if __name__ == '__main__':
     # Model
     logger.info('Building model...')
     # model = get_model(config.model).to(args.device)
-    model = VQPAE(config.model).to(args.device)
+    model = DDP(VQPAE(config.model).to(local_rank, device_ids=[local_rank]))
+    # DDP(FlowModel(config.model).to(local_rank), device_ids=[local_rank])
     # wandb.watch(model,log='all',log_freq=1)
     logger.info(f'Number of parameters for model: {count_parameters(model)*1e-7:.2f}M')
 
@@ -117,7 +131,7 @@ if __name__ == '__main__':
     # Resume
     if args.resume is not None:
         logger.info('Resuming from checkpoint: %s' % args.resume)
-        ckpt = torch.load(args.resume, map_location=args.device, weights_only=True)
+        ckpt = torch.load(args.resume, map_location=f'cuda:{local_rank}', weights_only=True)
         it_first = ckpt['iteration']  # + 1
         model.vqvae.quantizer.collected_samples = ckpt['model']['vqvae.quantizer.collected_samples']
         model.load_state_dict(ckpt['model'])
@@ -140,7 +154,7 @@ if __name__ == '__main__':
         model.train()
 
         # Prepare data
-        batch = recursive_to(next(train_iterator), args.device)
+        batch = recursive_to(next(train_iterator), local_rank)
 
         # Forward pass
         # loss_dict, metric_dict = model.get_loss(batch) # get loss and metrics
@@ -173,31 +187,32 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         time_backward_end = current_milli_time()
 
-        # Logging
-        scalar_dict = {}
-        # scalar_dict.update(metric_dict['scalar'])
-        u_count = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
-        u_prob = u_count / u_count.sum()
-        u_rate = (u_prob >= 1 / config.model.encoder.ipa.codebook_size / 10).sum() / u_count.shape[0]
-        scalar_dict.update({
-            'grad': orig_grad_norm,
-            'coodbook_usage_rate': float(u_rate),
-            'lr': optimizer.param_groups[0]['lr'],
-            'time_forward': (time_forward_end - time_start) / 1000,
-            'time_backward': (time_backward_end - time_forward_end) / 1000,
-        })
-        if not args.debug:
-            to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
-            log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger, to_log=to_log)
-        elif it == 100:
-            model.vqvae.quantizer.cluster_reset()
-        if it % (len_train_dataset // config.train.batch_size * 10) == 0:
-            coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+        if local_rank == 0:
+            # Logging
+            scalar_dict = {}
+            # scalar_dict.update(metric_dict['scalar'])
+            u_count = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+            u_prob = u_count / u_count.sum()
+            u_rate = (u_prob >= 1 / config.model.encoder.ipa.codebook_size / 10).sum() / u_count.shape[0]
+            scalar_dict.update({
+                'grad': orig_grad_norm,
+                'coodbook_usage_rate': float(u_rate),
+                'lr': optimizer.param_groups[0]['lr'],
+                'time_forward': (time_forward_end - time_start) / 1000,
+                'time_backward': (time_backward_end - time_forward_end) / 1000,
+            })
             if not args.debug:
-                plot_codebook_dist(coodbook_cnt, log_dir, it)
-            model.vqvae.quantizer.reset_counts()
-        elif it % (len_train_dataset // config.train.batch_size) == 0:
-            model.vqvae.quantizer.reset_counts()
+                to_log = it % (len_train_dataset // config.train.batch_size // 5) == 0
+                log_losses(loss, all_loss_dict, poc_loss_dict, pep_loss_dict, scalar_dict, it=it, tag='train', logger=logger, to_log=to_log)
+            elif it == 100:
+                model.vqvae.quantizer.cluster_reset()
+            if it % (len_train_dataset // config.train.batch_size * 10) == 0:
+                coodbook_cnt = model.vqvae.quantizer.batch_counts.detach().cpu().numpy()
+                if not args.debug:
+                    plot_codebook_dist(coodbook_cnt, log_dir, it)
+                model.vqvae.quantizer.reset_counts()
+            elif it % (len_train_dataset // config.train.batch_size) == 0:
+                model.vqvae.quantizer.reset_counts()
             
 
     def validate(it, mode):
@@ -275,7 +290,7 @@ if __name__ == '__main__':
                 # if not args.debug:
                 
             
-            if it % config.train.val_freq == 0:
+            if it % config.train.val_freq == 0 and local_rank == 0:
                 ckpt_path = os.path.join(ckpt_dir, '%d.pt' % it)
                 torch.save({
                     'config': config,
@@ -286,17 +301,18 @@ if __name__ == '__main__':
                     # 'avg_val_loss': avg_val_loss,
                 }, ckpt_path)
     except KeyboardInterrupt:
-        ckpt_path = os.path.join(ckpt_dir, '%d_last.pt' % it)
-        torch.save({
-            'config': config,
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict(),
-            'iteration': it,
-            # 'avg_val_loss': avg_val_loss,
-        }, ckpt_path)
-        logger.info('Terminating...')
-        print('Current iteration: %d' % it)
-        print("Log dir:", log_dir)
-        print('Last checkpoint saved to %s' % ckpt_path)
+        if local_rank == 0:
+            ckpt_path = os.path.join(ckpt_dir, '%d_last.pt' % it)
+            torch.save({
+                'config': config,
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict(),
+                'iteration': it,
+                # 'avg_val_loss': avg_val_loss,
+            }, ckpt_path)
+            logger.info('Terminating...')
+            print('Current iteration: %d' % it)
+            print("Log dir:", log_dir)
+            print('Last checkpoint saved to %s' % ckpt_path)
         

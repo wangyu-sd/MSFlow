@@ -54,9 +54,9 @@ class VectorQuantizer(nn.Module):
         self.low_usage_threshold = 1.e-4
         # self.register_buffer('step', torch.zeros((1,), dtype=torch.long).squeeze())
         
-        # self.rot_idx = rot_idx
-        # self.trans_idx = trans_idx
-        # self.angle_idx = angle_idx
+        self.rot_idx = rot_idx
+        self.trans_idx = trans_idx
+        self.angle_idx = angle_idx
     
     
     def reset_counts(self):
@@ -94,14 +94,14 @@ class VectorQuantizer(nn.Module):
         return p
     
     def get_dist_all(self, query, key, return_dist=False):
-        d_no_grad_fea = self.get_dist(query, key)
-        # d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], key[:, self.rot_idx:self.trans_idx])
-        # d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], key[:, self.trans_idx:self.angle_idx])
+        d_no_grad_fea = self.get_dist(query[:, :self.rot_idx], key[:, :self.rot_idx])
+        d_no_grad_rot = self.get_dist(query[:, self.rot_idx:self.trans_idx], key[:, self.rot_idx:self.trans_idx])
+        d_no_grad_trans = self.get_dist(query[:, self.trans_idx:self.angle_idx], key[:, self.trans_idx:self.angle_idx])
         # d_no_grad_angle = self.get_dist(query[:, self.angle_idx:], key[:, self.angle_idx:])
         
-        # d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans], return_dist=return_dist)
+        d_no_grad = self.weighted_sum([d_no_grad_fea, d_no_grad_rot, d_no_grad_trans], return_dist=return_dist)
         
-        return d_no_grad_fea
+        return d_no_grad
     
     def quantize_input(self, query, sampling=False):
         
@@ -119,13 +119,12 @@ class VectorQuantizer(nn.Module):
         return idx_N, h_NC, d_no_grad
     
     def get_mse_loss(self, x, y):
-        # loss_fea = F.mse_loss(x[:, :self.rot_idx], y[:, :self.rot_idx])
-        # loss_rot = F.mse_loss(x[:, self.rot_idx:self.trans_idx], y[:, self.rot_idx:self.trans_idx])
-        # loss_trans = F.mse_loss(x[:, self.trans_idx:self.angle_idx], y[:, self.trans_idx:self.angle_idx])
-        # # loss_angle = F.mse_loss(x[:, self.angle_idx:], y[:, self.angle_idx:])
+        loss_fea = F.mse_loss(x[:, :self.rot_idx], y[:, :self.rot_idx])
+        loss_rot = F.mse_loss(x[:, self.rot_idx:self.trans_idx], y[:, self.rot_idx:self.trans_idx])
+        loss_trans = F.mse_loss(x[:, self.trans_idx:self.angle_idx], y[:, self.trans_idx:self.angle_idx])
+        # loss_angle = F.mse_loss(x[:, self.angle_idx:], y[:, self.angle_idx:])
         
-        # loss_all = loss_fea + loss_rot + loss_trans
-        loss_all = F.mse_loss(x, y)
+        loss_all = loss_fea + loss_rot + loss_trans
         
         return loss_all
 
@@ -215,11 +214,11 @@ class VectorQuantizer(nn.Module):
         samples = self.collected_samples.detach().cpu().numpy()
         
         # split features
-        # split_shape =  [self.rot_idx, self.trans_idx, self.embedding_dim]
-        # start_idx = 0
-        # for end_idx in split_shape:
-        #     samples[:, start_idx:end_idx] = samples[:, start_idx:end_idx] / math.sqrt(end_idx - start_idx)
-        #     start_idx = end_idx
+        split_shape =  [self.rot_idx, self.trans_idx, self.embedding_dim]
+        start_idx = 0
+        for end_idx in split_shape:
+            samples[:, start_idx:end_idx] = samples[:, start_idx:end_idx] / math.sqrt(end_idx - start_idx)
+            start_idx = end_idx
         
         num_replace = len(low_usage_idx)
         # 计算低利用率code的均值
@@ -230,10 +229,10 @@ class VectorQuantizer(nn.Module):
         )
 
         # Recover the original scale
-        # start_idx = 0
-        # for end_idx in split_shape:
-        #     new_centroids[:, start_idx:end_idx] = new_centroids[:, start_idx:end_idx] * math.sqrt(end_idx - start_idx)
-        #     start_idx = end_idx
+        start_idx = 0
+        for end_idx in split_shape:
+            new_centroids[:, start_idx:end_idx] = new_centroids[:, start_idx:end_idx] * math.sqrt(end_idx - start_idx)
+            start_idx = end_idx
         
         # 更新embedding矩阵
         self.coodbook_generator.base.data[low_usage_idx] = torch.from_numpy(new_centroids).to(device)
