@@ -1,7 +1,5 @@
 import wandb
 import os
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 import sys
 import shutil
 import argparse
