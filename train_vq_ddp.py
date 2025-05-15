@@ -59,7 +59,7 @@ if __name__ == '__main__':
             exit()
 
     # Load configs
-    
+
     # if args.from_pretrain:
     #     path = os.path.dirname(os.path.dirname(args.from_pretrain))
     #     args.config = os.path.join(path, args.config.split('/')[-1])
@@ -70,11 +70,13 @@ if __name__ == '__main__':
     
     local_rank = args.local_rank
     torch.cuda.set_device(local_rank)
+    if local_rank == 0:
+        print(f"可见GPU: {torch.cuda.device_count()}张")  # 应输出4
+        print(f"当前使用GPU: {torch.cuda.current_device()}")  
 
     # Logging
     if args.debug or local_rank > 0:
         logger = get_logger('train', None, local_rank)
-        writer = BlackHole()
         writer = BlackHole()
     else:
         run = wandb.init(project=args.name, config=config, name='%s[%s]' % (config_name, args.tag))
@@ -149,6 +151,7 @@ if __name__ == '__main__':
     
     if not args.debug:
         print("Current Loger Dir: %s" % log_dir)
+    scaler = torch.amp.GradScaler()
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
@@ -171,7 +174,8 @@ if __name__ == '__main__':
             print('NAN Loss!')
             loss = torch.tensor(0.,requires_grad=True).to(loss.device)
 
-        loss.backward()
+        # loss.backward()
+        scaler.scale(loss).backward()
 
         # rescue for nan grad
         for param in model.parameters():
@@ -183,7 +187,9 @@ if __name__ == '__main__':
 
         # Backward
         # if it % config.train.accum_grad ==0:
-        optimizer.step()
+        
+        scaler.step(optimizer)
+        scaler.update()
         optimizer.zero_grad()
         time_backward_end = current_milli_time()
 

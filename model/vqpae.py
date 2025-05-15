@@ -24,7 +24,7 @@ from model.modules.common.geometry import construct_3d_basis, batch_align_with_r
 from torch.nn.utils.rnn import pad_sequence
 from model.models_con import torus
 from openfold.utils import rigid_utils as ru
-from equiformer_pytorch import Equiformer
+# from equiformer_pytorch import Equiformer
 # from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
 # from model.utils.misc import seed_all
 # from model.utils.train import sum_weighted_losses
