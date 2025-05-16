@@ -137,10 +137,10 @@ if __name__ == '__main__':
         logger.info('Resuming from checkpoint: %s' % args.resume)
         ckpt = torch.load(args.resume, map_location=f'cuda:{local_rank}', weights_only=True)
         it_first = ckpt['iteration']  # + 1
-        print(ckpt.keys())
-        print(ckpt['model'].keys())
+        # print(ckpt.keys())
+        # print(ckpt['model'].keys())
         model.module.vqvae.quantizer.collected_samples = ckpt['model']['module.vqvae.quantizer.collected_samples']
-        model.module.load_state_dict(ckpt['model'])
+        model.load_state_dict(ckpt['model'])
         logger.info('Resuming optimizer states...')
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
