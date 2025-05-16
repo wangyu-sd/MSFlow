@@ -26,7 +26,8 @@ from model.models_con.pep_dataloader import PepDataset
 
 from model.vqpae import VQPAE
 from model.plot_results import plot_codebook_dist
-
+from easydict import EasyDict
+torch.serialization.add_safe_globals([EasyDict])
 
 
 if __name__ == '__main__':
@@ -68,9 +69,7 @@ if __name__ == '__main__':
     
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
-    if local_rank == 0:
-        print(f"可见GPU: {torch.cuda.device_count()}张")  # 应输出4
-        print(f"当前使用GPU: {torch.cuda.current_device()}")  
+
 
     # Logging
     log_dir = None
@@ -95,6 +94,10 @@ if __name__ == '__main__':
             shutil.copyfile(args.config, os.path.join(log_dir, os.path.basename(args.config)))
     logger.info(args)
     logger.info(config)
+    
+    if local_rank == 0:
+        logger.info(f"可见GPU: {torch.cuda.device_count()}张")  # 应输出4
+        logger.info(f"当前使用GPU: {torch.cuda.current_device()}")  
     
     # Set up DDP
     logger.info('Initializing DDP...')
@@ -149,7 +152,7 @@ if __name__ == '__main__':
         logger.info('Done!')
     
     if not args.debug and log_dir is not None:
-        print("Current Loger Dir: %s" % log_dir)
+        logger.info("Current Loger Dir: %s" % log_dir)
     scaler = torch.amp.GradScaler()
     def train(it, mode):
         time_start = current_milli_time()
@@ -170,7 +173,7 @@ if __name__ == '__main__':
         time_forward_end = current_milli_time()
 
         if torch.isnan(loss):
-            print('NAN Loss!')
+            logger.info('NAN Loss!')
             loss = torch.tensor(0.,requires_grad=True).to(loss.device)
 
         # loss.backward()
@@ -317,8 +320,8 @@ if __name__ == '__main__':
                 # 'avg_val_loss': avg_val_loss,
             }, ckpt_path)
             logger.info('Terminating...')
-            print('Current iteration: %d' % it)
-            print("Log dir:", log_dir)
-            print('Last checkpoint saved to %s' % ckpt_path)
+            logger.info('Current iteration: %d' % it)
+            logger.info("Log dir:", log_dir)
+            logger.info('Last checkpoint saved to %s' % ckpt_path)
             distrib.destroy_process_group()
         
