@@ -134,7 +134,7 @@ if __name__ == '__main__':
         logger.info('Done!')
     
     if not args.debug:
-        print("Current Loger Dir: %s" % log_dir)
+        logger.info("Current Loger Dir: %s" % log_dir)
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
