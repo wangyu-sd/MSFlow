@@ -216,7 +216,7 @@ class PAR(nn.Module):
             # logits_BLV = (1+t) * logits_BLV[:B] - t * logits_BLV[B:]
 
             # 
-            if si >= 3:
+            if si >= 10:
                 idx_Bl = sample_with_top_k_top_p(logits_BLV, rng=None, top_k=top_k, top_p=top_p, num_samples=1)[:, :, 0]
                 # idx_Bl = logits_BLV.argmax(dim=-1)
             else:

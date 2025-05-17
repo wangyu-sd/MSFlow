@@ -277,7 +277,7 @@ class VQPAE(nn.Module):
             
             ####### For Peptide
             pep_res = self.vqvae(fea_dict, mode='pep_given_poc')
-            pep_loss = self.get_loss(pep_res, fea_dict, mode='pep')
+            pep_loss = self.get_loss(pep_res, fea_dict, mode='all')
         
 
         return all_loss, poc_loss, pep_loss

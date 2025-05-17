@@ -162,8 +162,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:7')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default="log_par/learn_all[main-4b533be]_2025_05_08__10_09_34/checkpoints/45000.pt")
-    parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/33778_last.pt")
+    parser.add_argument('--resume', type=str, default=None)
+    # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/33778_last.pt")
+    parser.add_argument("--from_pretrain", type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-9a48f57]_2025_05_16__07_25_51/checkpoints/207482_last.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 
@@ -232,8 +233,9 @@ if __name__ == '__main__':
     # model_vq = VQPAE(config.model).to(args.device)
     logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
     ckpt = torch.load(args.from_pretrain, map_location=args.device, weights_only=True)
+    ckpt['model'] = {k.replace('module.', ''): v for k,v in ckpt['model'].items()}
     model_vq = VQPAE(ckpt['config'].model).to(args.device)  
-    ckpt['model']['vqvae.quantizer.collected_samples'] = model_vq.vqvae.quantizer.collected_samples
+    model_vq.vqvae.quantizer.collected_samples = ckpt['model']['vqvae.quantizer.collected_samples']
     model_vq.load_state_dict(ckpt['model'])
     logger.info('Done!')
     
