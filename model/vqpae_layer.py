@@ -178,6 +178,9 @@ class VQPAEBlock(nn.Module):
                     edge_embed = trunk[f'edge_transition_{b}'](
                         node_embed, edge_embed)
                     edge_embed *= edge_mask[..., None]
+                    
+                del seq_tfmr_out
+                del ipa_embed
 
                 
                 node_embed = x + node_embed * node_mask[..., None]
