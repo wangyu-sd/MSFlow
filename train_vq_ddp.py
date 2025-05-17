@@ -301,6 +301,7 @@ if __name__ == '__main__':
                 
             
             if it % config.train.val_freq == 0 and local_rank == 0:
+                validate(it, mode='pep_or_poc')
                 ckpt_path = os.path.join(ckpt_dir, '%d.pt' % it)
                 torch.save({
                     'config': config,

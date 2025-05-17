@@ -144,7 +144,7 @@ class VQPAEBlock(nn.Module):
         num_blocks = self.num_encoder_blocks if trunk_type == 'encoder' else self.num_decoder_blocks
         
         
-        for _ in range(1):
+        for _ in range(3):
             for b in range(num_blocks):
                 ipa_embed = trunk[f'ipa_{b}'](
                     node_embed, edge_embed, curr_rigids, node_mask)
