@@ -144,8 +144,9 @@ class VQPAEBlock(nn.Module):
         num_blocks = self.num_encoder_blocks if trunk_type == 'encoder' else self.num_decoder_blocks
         
         
-        for _ in range(3):
+        for iter_idx in range(3):
             for b in range(num_blocks):
+                print(f"Iter {iter_idx} B {b}: Allocated {torch.cuda.memory_allocated()//1024**2}MB")
                 ipa_embed = trunk[f'ipa_{b}'](
                     node_embed, edge_embed, curr_rigids, node_mask)
                 ipa_embed *= node_mask[..., None]
