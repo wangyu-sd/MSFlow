@@ -49,7 +49,7 @@ par:
 
 train:
   loss_weights:
-    trans_loss: 0.5s # 1.0 for dreamfold, 0.05 for yim
+    trans_loss: 1.0 # 1.0 for dreamfold, 0.05 for yim
     rot_loss: 0.5 # 1.0 for dreamfold, 0.5 for yim
     bb_atom_loss: 0.5
     seqs_loss: 1.0
@@ -58,7 +58,7 @@ train:
     vae_loss: 0.5
     commitment_loss: 1.
     q_latent_loss: 1.
-    dist_loss: 1.0
+    dist_loss: 2.0
     fape_loss: 0.05
     clash_loss: 1.0
     bb_angle_loss: 1.0
