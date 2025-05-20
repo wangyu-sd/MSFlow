@@ -3,49 +3,28 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# import copy
-# import math
-# from tqdm.auto import tqdm
-# import functools
-# from torch.utils.data import DataLoader
-# import os
-# import argparse
 from typing import Dict, Tuple
 
-# import pandas as pd
 
 from model.models_con.edge import EdgeEmbedder
 from model.models_con.node import NodeEmbedder
-# from model.modules.common.layers import sample_from, clampped_one_hot
 from model.vqpae_layer import VQPAEBlock
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
-from model.modules.common.geometry import construct_3d_basis, batch_align_with_r
+from model.modules.common.geometry import construct_3d_basis, global_to_local
 from torch.nn.utils.rnn import pad_sequence
 from model.models_con import torus
 from openfold.utils import rigid_utils as ru
-# from equiformer_pytorch import Equiformer
-# from model.utils.data import mask_select_data, find_longest_true_segment, PaddingCollate
-# from model.utils.misc import seed_all
-# from model.utils.train import sum_weighted_losses
-# from torch.nn.utils import clip_grad_norm_
-
-# from model.modules.so3.dist import centered_gaussian,uniform_so3
-# from model.modules.common.geometry import batch_align, align
-
-# from tqdm import tqdm
-
-# import wandb
-
+from model.modules.so3.dist import centered_gaussian, uniform_so3
 from dm import so3_utils
 from dm import all_atom
+from openfold.np import residue_constants
+IDEALIZED_POS = torch.tensor(residue_constants.restype_atom14_rigid_group_positions)
 
 # from model.models_con.pep_dataloader import PepDataset
 
 # from model.utils.misc import load_config
 # from model.utils.train import recursive_to
 # from easydict import EasyDict
-
 
 
 from model.models_con.torsion import torsions_mask
@@ -55,13 +34,13 @@ resolution_to_num_atoms = {
     'full': max_num_heavyatoms
 }
 
-class VQPAE(nn.Module):
+class MSFlowMatching(nn.Module):
     def __init__(self,cfg):
         super().__init__()
         self._model_cfg = cfg.encoder
         self.node_embedder = NodeEmbedder(cfg.encoder.node_embed_size, 3)
         self.edge_embedder = EdgeEmbedder(cfg.encoder.edge_embed_size, 3)
-        self.vqvae: VQPAEBlock = VQPAEBlock(cfg.encoder.ipa)
+        self.encoder: VQPAEBlock = VQPAEBlock(cfg.encoder.ipa)
         self.strc_loss_fn = ProteinStructureLoss()
         # self.node_proj = nn.Linear(cfg.encoder.node_embed_size, cfg.encoder.ipa.c_s)
         # self.edge_proj = nn.Linear(cfg.encoder.edge_embed_size, cfg.encoder.ipa.c_z)
@@ -72,15 +51,10 @@ class VQPAE(nn.Module):
             trans_1 = batch['pos_heavyatom'][:, :, BBHeavyAtom.CA]
             seqs_1 = batch['aa']
             context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
-            trans_1, rotmats_1 = align_to_principal_axis(trans_1, rotmats_1,context_mask)
-            
-            angles_1 = batch['torsion_angle']
-            # poc_mask = torch.logical_and(batch['res_mask'], ~batch['generate_mask'])
-        # context_mask = torch.logical_and(batch['mask_heavyatom'][:, :, BBHeavyAtom.CA], ~batch['generate_mask'])
-        # structure_mask = context_mask 
-        # sequence_mask = context_mask
-        trans_1 = trans_1 * batch['res_mask'][..., None]
-        rotmats_1 = rotmats_1 * batch['res_mask'][..., None, None]
+            crd = global_to_local(rotmats_1, trans_1, batch['pos_heavyatom']) * batch['heavyatom_mask'][:, :, :, None]
+ 
+            trans_1 = trans_1 * batch['res_mask'][..., None]
+            rotmats_1 = rotmats_1 * batch['res_mask'][..., None, None]
         # rotmats_avg = avg_rotation(rotmats_1, poc_mask)
         # rotmats_1 = rotmats_1.unsqueeze(1) @ rotmats_avg
         trans_1, _ = self.zero_center_part(trans_1,  batch['generate_mask'], batch['res_mask'])
@@ -103,7 +77,7 @@ class VQPAE(nn.Module):
         batched_res = {
             "rotmats": rotmats_1,
             "trans": trans_1,
-            "angles": angles_1, 
+            "crd": crd,
             "seqs": seqs_1, 
             "node_embed": node_embed, 
             "edge_embed": edge_embed,
@@ -111,7 +85,7 @@ class VQPAE(nn.Module):
             "res_mask": res_mask,
         }
         
-        batched_res['node_embed'] = self.vqvae.fea_fusion(batched_res)
+        batched_res['node_embed'] = self.encoder.fea_fusion(batched_res)
         
         return batched_res
     
@@ -127,6 +101,64 @@ class VQPAE(nn.Module):
         pos = pos - center
         pos = pos * res_mask[...,None]
         return pos, center
+    
+    def seq_to_simplex(self,seqs):
+        return clampped_one_hot(seqs, self.K).float() * self.k * 2 - self.k # (B,L,K)
+    
+    
+    def forward(self, batch):
+
+        num_batch, num_res = batch['aa'].shape
+        gen_mask,res_mask,angle_mask = batch['generate_mask'].long(),batch['res_mask'].long(),batch['torsion_angle_mask'].long()
+
+        #encode
+        rotmats_1, trans_1, angles_1, seqs_1, node_embed, edge_embed = self.encode(batch) # no generate mask
+
+        # prepare for denoise
+        trans_1_c,_ = self.zero_center_part(trans_1,gen_mask,res_mask)
+        trans_1_c = trans_1 # already centered when constructing dataset
+        seqs_1_simplex = self.seq_to_simplex(seqs_1)
+        seqs_1_prob = F.softmax(seqs_1_simplex,dim=-1)
+        rcd_1 = batch['rcd']
+        
+        
+        with torch.no_grad():
+            t = torch.rand((num_batch,1), device=batch['aa'].device) 
+            t = t*(1-2 * self._interpolant_cfg.min_t) + self._interpolant_cfg.min_t # avoid 0
+            if True:
+                # corrupt trans
+                trans_0 = torch.randn((num_batch,num_res,3), device=batch['aa'].device) * self._interpolant_cfg.trans.sigma # scale with sigma?
+                trans_0_c,_ = self.zero_center_part(trans_0,gen_mask,res_mask)
+                trans_t = (1-t[...,None])*trans_0_c + t[...,None]*trans_1_c
+                trans_t_c = torch.where(batch['generate_mask'][...,None],trans_t,trans_1_c)
+                # corrupt rotmats
+                rotmats_0 = uniform_so3(num_batch,num_res,device=batch['aa'].device)
+                rotmats_t = so3_utils.geodesic_t(t[..., None], rotmats_1, rotmats_0)
+                rotmats_t = torch.where(batch['generate_mask'][...,None,None],rotmats_t,rotmats_1)
+                # corrup rcd
+                rcd_0 = torch.randn_like(rcd_1) * 1e-3 
+                rcd_t = (1-t[...,None])*rcd_0 + t[...,None]*rcd_1
+                rcd_t = torch.where(batch['generate_mask'][...,None],rcd_t,rcd_1)
+            else:
+                trans_t_c = trans_1_c.detach().clone()
+                rotmats_t = rotmats_1.detach().clone()
+                angles_t = angles_1.detach().clone()
+                
+            if True:
+                # corrupt seqs
+                seqs_0_simplex = self.k * torch.randn_like(seqs_1_simplex) # (B,L,K)
+                seqs_0_prob = F.softmax(seqs_0_simplex,dim=-1) # (B,L,K)
+                seqs_t_simplex = ((1 - t[..., None]) * seqs_0_simplex) + (t[..., None] * seqs_1_simplex) # (B,L,K)
+                seqs_t_simplex = torch.where(batch['generate_mask'][...,None],seqs_t_simplex,seqs_1_simplex)
+                seqs_t_prob = F.softmax(seqs_t_simplex,dim=-1) # (B,L,K)
+                seqs_t = sample_from(seqs_t_prob) # (B,L)
+                seqs_t = torch.where(batch['generate_mask'],seqs_t,seqs_1)
+            else:
+                seqs_t = seqs_1.detach().clone()
+                seqs_t_simplex = seqs_1_simplex.detach().clone()
+                seqs_t_prob = seqs_1_prob.detach().clone()
+        
+        
     
     
     
@@ -254,20 +286,20 @@ class VQPAE(nn.Module):
         
         if mode == "codebook":
             # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
-            res = self.vqvae.forward_init(fea_dict, mode="pep_and_poc")
+            res = self.encoder.forward_init(fea_dict, mode="pep_and_poc")
             pep_loss = self.get_loss(res, fea_dict, mode='pep_and_poc')
         
         elif mode == "poc_and_pep" or mode == "pep_and_poc":
             # pass
             # fea_dict['trans'], _ = self.zero_center_part(fea_dict['trans_raw'], res_mask, res_mask)
-            res = self.vqvae(fea_dict, mode="poc_and_pep")
+            res = self.encoder(fea_dict, mode="poc_and_pep")
             all_loss = self.get_loss(res, fea_dict, "all")
             
         elif mode == "pep_or_poc":
             # res = self.vqvae(fea_dict, mode="poc")
             # poc_loss = self.get_loss(res, fea_dict, "poc", weigeht=0.05)
             
-            res_pep = self.vqvae(fea_dict, mode="pep_given_poc")
+            res_pep = self.encoder(fea_dict, mode="pep_given_poc")
             pep_loss = self.get_loss(res_pep, fea_dict, "pep")
             
         elif mode == "pep_given_poc":
@@ -278,7 +310,7 @@ class VQPAE(nn.Module):
             # poc_loss = self.get_loss(poc_res, fea_dict, mode='poc', weigeht=0.1)
             
             ####### For Peptide
-            pep_res = self.vqvae(fea_dict, mode='pep_given_poc')
+            pep_res = self.encoder(fea_dict, mode='pep_given_poc')
             pep_loss = self.get_loss(pep_res, fea_dict, mode='all')
         
 
@@ -349,6 +381,21 @@ def align_to_principal_axis(
     
     return aligned_trans, aligned_rotation
 
+
+
+def clampped_one_hot(x, num_classes):
+    mask = (x >= 0) & (x < num_classes) # (N, L)
+    x = x.clamp(min=0, max=num_classes-1)
+    y = F.one_hot(x, num_classes) * mask[...,None]  # (N, L, C)
+    return y
+
+
+def sample_from(c):
+    """sample from c"""
+    N,L,K = c.size()
+    c = c.view(N*L,K) + 1e-8
+    x = torch.multinomial(c,1).view(N,L)
+    return x
     
 
 class ProteinStructureLoss(nn.Module):
