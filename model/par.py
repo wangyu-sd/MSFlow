@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from model.vq import VectorQuantizer
 from model.var_basics import AdaLNSelfAttn, AdaLNBeforeHead, SharedAdaLin, AdaLNCrossAttn
 from model.var_helpers import sample_with_top_k_top_p
-from model.vqpae_layer import VQPAEBlock
+from model.encoder_layer import VQPAEBlock
 from model.vqpae import VQPAE
 
 

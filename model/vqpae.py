@@ -18,7 +18,7 @@ from typing import Dict, Tuple
 from model.models_con.edge import EdgeEmbedder
 from model.models_con.node import NodeEmbedder
 # from model.modules.common.layers import sample_from, clampped_one_hot
-from model.vqpae_layer import VQPAEBlock
+from model.encoder_layer import VQPAEBlock
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
 from model.modules.common.geometry import construct_3d_basis, batch_align_with_r
 from torch.nn.utils.rnn import pad_sequence

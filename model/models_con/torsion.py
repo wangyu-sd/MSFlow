@@ -6,6 +6,91 @@ from typing import Any, Optional, Union, cast
 from model.modules.common.geometry import *
 import model.modules.protein.constants as constants
 
+
+def _get_torsion_batched(p0, p1, p2, p3):
+    """批量计算二面角"""
+    v0 = p2 - p1  # [B, L, ..., 3]
+    v1 = p0 - p1
+    v2 = p3 - p2
+    
+    u1 = torch.cross(v0, v1, dim=-1)
+    n1 = u1 / (torch.linalg.norm(u1, dim=-1, keepdim=True) + 1e-8)
+    
+    u2 = torch.cross(v0, v2, dim=-1)
+    n2 = u2 / (torch.linalg.norm(u2, dim=-1, keepdim=True) + 1e-8)
+    
+    sgn = torch.sign((torch.cross(v1, v2, dim=-1) * v0).sum(-1, keepdim=True))
+    dihed = sgn * torch.acos((n1 * n2).sum(-1).clamp(min=-0.999999, max=0.999999))
+    return dihed.squeeze(-1)
+
+def get_chi_angles_batched(restype, pos14):
+    """批量计算chi角 [B, L, 4]"""
+    B, L = restype.shape[:2]
+    device = pos14.device
+    
+    # 预加载原子索引表 [20, 4, 4]
+    chi_atom_indices = torch.stack([
+        torch.tensor([constants.restype_atom14_name_to_index[aa][a] 
+                     for a in constants.chi_angles_atoms[aa]], device=device)
+        for aa in range(20)
+    ])  # 假设氨基酸类型为0-19
+    
+    # 批量索引 [B, L, 4, 4]
+    atom_idx = chi_atom_indices[restype]  # restype: [B, L]
+    
+    # 收集原子坐标 [B, L, 4, 4, 3]
+    p = torch.gather(
+        pos14.unsqueeze(2).expand(-1, -1, 4, -1, -1), 
+        dim=3, 
+        index=atom_idx.unsqueeze(-1).expand(-1, -1, -1, -1, 3)
+    )
+    
+    # 批量计算二面角 [B, L, 4]
+    torsions = _get_torsion_batched(
+        p[...,0,:], p[...,1,:], 
+        p[...,2,:], p[...,3,:]
+    )
+    
+    # 处理无效氨基酸类型
+    valid_mask = (restype < constants.AA.UNK).unsqueeze(-1)
+    torsions = torch.where(valid_mask, torsions, torch.tensor(float('inf'), device=device))
+    
+    return torsions
+
+
+
+def get_psi_angle_batched(pos14: torch.Tensor) -> torch.Tensor:
+    """批量计算psi角 [B, L]"""
+    # 原子索引：0-N,1-CA,2-C,3-O (维度自动广播)
+    return _get_torsion_batched(
+        pos14[...,0,:],  # [B, L, 3]
+        pos14[...,1,:], 
+        pos14[...,2,:], 
+        pos14[...,3,:]
+    )
+
+def get_torsion_angle_batched(pos14: torch.Tensor, aa: torch.LongTensor):
+    """批量入口函数 [B, L, 5]"""
+    B, L = aa.shape[:2]
+    device = pos14.device
+    
+    # 批量计算chi角 [B, L, 4]
+    chi_angles = get_chi_angles_batched(aa, pos14)
+    
+    # 批量计算psi角 [B, L]
+    psi_angles = get_psi_angle_batched(pos14).unsqueeze(-1)  # [B, L, 1]
+    
+    # 合并结果 [B, L, 5]
+    torsion = torch.cat([psi_angles, chi_angles], dim=-1)
+    
+    # 生成掩码 [B, L, 5]
+    valid_mask = (aa < constants.AA.UNK).unsqueeze(-1)
+    torsion_mask = (torsion != float('inf')) & valid_mask
+    
+    # 后处理
+    torsion = torsion.nan_to_num(posinf=0.) % (2 * math.pi)
+    return torsion, torsion_mask.bool()
+
 """
 calc torsion angles between (0,2pi)
 """
