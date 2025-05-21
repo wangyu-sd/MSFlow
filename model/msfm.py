@@ -156,7 +156,6 @@ class MSFlowMatching(nn.Module):
                 seqs_t_simplex = seqs_1_simplex.detach().clone()
                 seqs_t_prob = seqs_1_prob.detach().clone()
                 
-                
             # corrup rcd
             # B, L, K @ K, 14, 3 -> B, L, 14, 3
             rcd_0 = torch.einsum('bik,kjc->bijc', seqs_0_prob, IDEALIZED_POS) # (B,L,14,3)
@@ -164,29 +163,31 @@ class MSFlowMatching(nn.Module):
             rcd_t = (1-t[...,None]) * rcd_0 + t[...,None] * rcd_1
             rcd_t = torch.where(batch['generate_mask'][...,None],rcd_t, rcd_1)
             
-            batch_fea = {
-                "t": t,
-                "rotmats_t": rotmats_t,
-                "trans_t": trans_t,
-                "rcd_t": rcd_t,
-                "seqs_t": seqs_t,
-                "generate_mask": gen_mask,
-                "res_mask": res_mask,
-                "node_embed": node_embed,
-                "edge_embed": edge_embed,
-            }
-            
-            res = self.encoder(batch_fea)
-            
-            gt_fea = {
-                'trans_1': trans_1,
-                'rotmats_1': rotmats_1,
-                'seq_1': seqs_1,
-                'rcd_1': rcd_1,
-            }
-            batch_fea.update(gt_fea)
-            
-            loss = self.get_loss(res, batch_fea, mode="pepe")
+        batch_fea = {
+            "t": t,
+            "rotmats_t": rotmats_t,
+            "trans_t": trans_t,
+            "rcd_t": rcd_t,
+            "seqs_t": seqs_t,
+            "generate_mask": gen_mask,
+            "res_mask": res_mask,
+            "node_embed": node_embed,
+            "edge_embed": edge_embed,
+        }
+        
+        res = self.encoder(batch_fea)
+        
+        gt_fea = {
+            'trans_1': trans_1,
+            'rotmats_1': rotmats_1,
+            'seq_1': seqs_1,
+            'rcd_1': rcd_1,
+        }
+        batch_fea.update(gt_fea)
+        
+        loss = self.get_loss(res, batch_fea, mode="pepe")
+        
+        return loss
         
     
     
@@ -272,7 +273,6 @@ class MSFlowMatching(nn.Module):
         seqs_loss = torch.mean(seqs_loss)
         
         
-
         res_ =  {
             "trans_loss": trans_loss * weigeht,
             'rot_loss': rot_loss * weigeht,
