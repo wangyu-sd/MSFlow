@@ -121,7 +121,8 @@ if __name__ == '__main__':
     # Model
     logger.info('Building model...')
     # model = get_model(config.model).to(args.device)
-    model = DDP(MSFlowMatching(config.model).cuda(), device_ids=[local_rank])
+    # model = DDP(MSFlowMatching(config.model).cuda(), device_ids=[local_rank])
+    model = MSFlowMatching(config.model).to(device=local_rank)
     # DDP(FlowModel(config.model).to(local_rank), device_ids=[local_rank])
     # wandb.watch(model,log='all',log_freq=1)
     logger.info(f'Number of parameters for model: {count_parameters(model)*1e-7:.2f}M')
@@ -130,6 +131,7 @@ if __name__ == '__main__':
     optimizer = get_optimizer(config.train.optimizer, model)
     scheduler = get_scheduler(config.train.scheduler, optimizer)
     optimizer.zero_grad()
+    scaler = torch.amp.GradScaler()
     it_first = 1
 
     # Resume
@@ -145,6 +147,8 @@ if __name__ == '__main__':
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
         scheduler.load_state_dict(ckpt['scheduler'])
+        scaler.load_state_dict(ckpt['scaler'])
+        
         
     elif args.from_pretrain is not None:
         logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
@@ -152,10 +156,13 @@ if __name__ == '__main__':
         logger.info(f'Loading pretrain model states from {args.from_pretrain}')
         model.module.load_state_dict(ckpt['model'], strict=False)
         logger.info('Done!')
+        
+    
+    model = DDP(model, device_ids=[local_rank])
     
     if not args.debug and log_dir is not None:
         logger.info("Current Loger Dir: %s" % log_dir)
-    scaler = torch.amp.GradScaler()
+    
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
@@ -286,6 +293,7 @@ if __name__ == '__main__':
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
                 'iteration': it,
+                'scaler': scaler.state_dict(), 
                 # 'avg_val_loss': avg_val_loss,
             }, ckpt_path)
             logger.info('Terminating...')
