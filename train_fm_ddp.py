@@ -147,7 +147,9 @@ if __name__ == '__main__':
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
         scheduler.load_state_dict(ckpt['scheduler'])
-        scaler.load_state_dict(ckpt['scaler'])
+        if "scaler" in ckpt:
+            logger.info('Resuming scaler states...')
+            scaler.load_state_dict(ckpt['scaler'])
         
         
     elif args.from_pretrain is not None:
