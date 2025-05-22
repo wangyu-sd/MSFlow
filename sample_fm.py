@@ -18,7 +18,7 @@ from model.utils.vc import get_version
 from model.utils.misc import BlackHole, inf_iterator, load_config
 from model.utils.train import recursive_to
 
-from model.modules.common.geometry import reconstruct_backbone, reconstruct_backbone_partially, align, batch_align
+from model.modules.common.geometry import reconstruct_backbone, reconstruct_backbone_partially, align, batch_align, local_to_global
 from model.modules.protein.writers import save_pdb
 
 from model.utils.data import PaddingCollate
@@ -46,8 +46,7 @@ from model.utils.data import PaddingCollate
 from model.utils.train import ScalarMetricAccumulator, count_parameters, get_optimizer, get_scheduler, log_losses, recursive_to, sum_weighted_losses
 
 from model.models_con.pep_dataloader import PepDataset
-from model.par import PAR
-from model.vqpae import VQPAE
+from model.msfm import MSFlowMatching
 from torch.serialization import add_safe_globals
 import easydict
 add_safe_globals([easydict.EasyDict])
@@ -162,9 +161,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:7')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--resume', type=str, default=None)
+    parser.add_argument('--resume', type=str, default='/remote-home/wangyu/VQ-PAR/logs/learn_all[main-71aac24]_2025_05_22__09_49_20/checkpoints/25000.pt')
     # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/33778_last.pt")
-    parser.add_argument("--from_pretrain", type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-9a48f57]_2025_05_16__07_25_51/checkpoints/245000.pt")
+    # parser.add_argument("--from_pretrain", type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-71aac24]_2025_05_22__09_49_20/checkpoints/25000.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 
@@ -210,7 +209,6 @@ if __name__ == '__main__':
         print("Logdir: %s" % log_dir)
     logger.info(args)
     logger.info(config)
-    config['from_pretrain'] = args.from_pretrain
     config['resume'] = args.resume
     
 
@@ -231,27 +229,17 @@ if __name__ == '__main__':
     logger.info('Building model...')
     # model = get_model(config.model).to(args.device)
     # model_vq = VQPAE(config.model).to(args.device)
-    logger.info('Load pretrain model from checkpoint: %s' % args.from_pretrain)
-    ckpt = torch.load(args.from_pretrain, map_location=args.device, weights_only=True)
+    logger.info('Load resume model from checkpoint: %s' % args.resume)
+    ckpt = torch.load(args.resume, map_location=args.device, weights_only=True)
     ckpt['model'] = {k.replace('module.', ''): v for k,v in ckpt['model'].items()}
-    model_vq = VQPAE(ckpt['config'].model).to(args.device)  
-    model_vq.vqvae.quantizer.collected_samples = ckpt['model']['vqvae.quantizer.collected_samples']
-    model_vq.load_state_dict(ckpt['model'])
+    model = MSFlowMatching(ckpt['config'].model).to(args.device)  
+    model.load_state_dict(ckpt['model'])
     logger.info('Done!')
     
     
     # wandb.watch(model,log='all',log_freq=1)
     logger.info('Load pretrain model from checkpoint: %s' % args.resume)
-    if args.resume is not None:
-        ckpt = torch.load(args.resume, map_location=args.device, weights_only=True)
-        model_par: PAR = PAR(model_vq, ckpt['config']).to(args.device)
-        model_par.load_state_dict(ckpt['model'])
-    else:
-        model_par: PAR = PAR(model_vq, config).to(args.device)
-    logger.info(f'Number of parameters for model: {count_parameters(model_vq)*1e-7:.2f}M')
-    logger.info(f'Number of parameters for model_par: {count_parameters(model_par)*1e-7:.2f}M')
-    
-    model = model_par
+    logger.info(f'Number of parameters for model: {count_parameters(model)*1e-7:.2f}M')
     model.eval()
 
 
@@ -277,11 +265,14 @@ if __name__ == '__main__':
         batch = recursive_to(batch, args.device)    
         
         for sp_idx in tqdm(range(args.sample_num), desc="Generating Multiple Samples", dynamic_ncols=True):
-            final = model.autoregressive_infer_cfg(batch, cfg=0.0, top_k=2, top_p=0.0)
+            final = model.sample(batch, num_steps=100)
+            final = final[-1]
             # final = model.anchor_based_infer(batch, cfg=0.0, top_k=5, top_p=0.0)
-            pos_ha,_,_ = full_atom_reconstruction(R_bb=final['rotmats'],t_bb=final['trans'],angles=final['angles'],aa=final['seqs_gt'])
+            # pos_ha,_,_ = full_atom_reconstruction(R_bb=final['rotmats'],t_bb=final['trans'],angles=final['angles'],aa=final['seqs_gt'])
+            pos_ha = local_to_global(final['rotmats'], final['trans'], final['crd'])
             pos_ha = F.pad(pos_ha, pad=(0,0,0,15-14), value=0.) # (B,L,A,3) pos14 A=14
-            pos_new = torch.where(batch['generate_mask'][:,:,None,None],pos_ha,batch['pos_heavyatom'])
+            pos_new = pos_ha
+            # pos_new = torch.where(batch['generate_mask'][:,:,None,None],pos_ha,batch['pos_heavyatom'])
             mask_new = get_heavyatom_mask(final['seqs'])
             aa_new = final['seqs']
             
@@ -289,7 +280,7 @@ if __name__ == '__main__':
             for jdx in range(batch_size):
                 data_saved = {
                             'chain_nb':batch['chain_nb'][jdx].cpu(),'chain_id':batch_chain_id[jdx],'resseq':batch['resseq'][jdx].cpu(),'icode':icode,
-                            'aa':aa_new[jdx].cpu(), 'mask_heavyatom':mask_new[jdx].cpu(), 'pos_heavyatom':pos_new[jdx].cpu(),
+                            'aa':aa_new[jdx], 'mask_heavyatom':mask_new[jdx], 'pos_heavyatom':pos_new[jdx],
                             }
                 data_saved = mask_validate(data_saved, batch['res_mask'][jdx].cpu())
                 save_pdb(data_saved,path=os.path.join(res_dir, batch["id"][jdx],f'{batch["id"][jdx]}_{sp_idx}.pdb'))

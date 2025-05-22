@@ -43,9 +43,9 @@ model:
 train:
   loss_weights:
     trans_loss: 0.5 # 1.0 for dreamfold, 0.05 for yim
-    rot_loss: 0.5 # 1.0 for dreamfold, 0.5 for yim
+    rot_loss: 0.25 # 1.0 for dreamfold, 0.5 for yim
     crd_loss: 0.5
-    bb_atom_loss: 0.25
+    bb_atom_loss: 0.5
     seqs_loss: 1.0
     angle_loss: 0.5
     torsion_loss: 1.0
@@ -55,8 +55,11 @@ train:
     dist_loss: 0.5
     fape_loss: 0.05
     clash_loss: 0.5
-    bb_angle_loss: 0.1
-    bb_torsion_loss: 0.1
+    bb_angle_loss: 0.05
+    bb_torsion_loss: 0.05
+    idg_loss : 0.1
+    crd_dist_loss: 0.1
+    inter_dist_loss: 0.25
     # div_loss: 0.1
     # global_rotmats_loss: 0.01
 

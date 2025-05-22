@@ -10,7 +10,7 @@ from model.models_con.edge import EdgeEmbedder
 from model.models_con.node import NodeEmbedder
 from model.encoder_layer import GAEncoder
 from model.modules.protein.constants import AA, BBHeavyAtom, max_num_heavyatoms
-from model.modules.common.geometry import construct_3d_basis, global_to_local
+from model.modules.common.geometry import construct_3d_basis, global_to_local, local_to_global
 from torch.nn.utils.rnn import pad_sequence
 from model.models_con import torus
 from openfold.utils import rigid_utils as ru
@@ -21,7 +21,7 @@ from openfold.np import residue_constants
 from model.models_con.torsion import get_torsion_angle_batched
 IDEALIZED_POS = torch.tensor(residue_constants.restype_atom14_rigid_group_positions) # K=21, 14, 3
 IDEALIZED_POS = F.pad(IDEALIZED_POS, (0, 0, 0, 1), mode='constant', value=0.0)[:-1] # K=21, 15, 3  -> K=20, 15, 3
-
+from tqdm import tqdm
 # from model.models_con.pep_dataloader import PepDataset
 
 # from model.utils.misc import load_config
@@ -209,15 +209,25 @@ class MSFlowMatching(nn.Module):
         
         # crd_loss
         B, L = pred_crd.shape[:2]
-        pred_crd, crd_1 = pred_crd.view(B, L, -1), crd_t.view(B, L, -1)
-        crd_loss = torch.sum((pred_crd - crd_1)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
+        crd_loss = torch.sum((pred_crd.view(B, L, -1) - crd_1.reshape(B, L, -1))**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         crd_loss = torch.mean(crd_loss)
+        
+        pred_crd_dist = torch.cdist(pred_crd.view(B*L, -1, 3), pred_crd.view(B*L, -1, 3), p=2) # (BL, A, A)
+        gt_crd_dist = torch.cdist(crd_1.view(B*L, -1, 3), crd_1.view(B*L, -1, 3), p=2) # (BL,A, A)
+        
+        crd_dist_loss = (pred_crd_dist - gt_crd_dist).pow(2).sum(dim=[1, 2]).view(B, L)
+        crd_dist_loss = torch.sum(crd_dist_loss * gen_mask, dim=-1) / (torch.sum(gen_mask, dim=-1) + 1e-8) # (B,)
+        crd_dist_loss = torch.mean(crd_dist_loss)
 
         # aux loss
         pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_1_c, gen_mask)
         trans_gen = self.strc_loss_fn.extract_fea_from_gen(trans_1, gen_mask)
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
-        strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm)
+        
+        poc_mask = torch.logical_and(gen_mask.bool(), res_mask.bool())
+        trans_pos = self.strc_loss_fn.extract_fea_from_gen(trans_1, poc_mask)
+        poc_mask = self.strc_loss_fn.extract_fea_from_gen(poc_mask, poc_mask)
+        strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm, trans_pos, poc_mask)
         
         # seqs loss
         gt_rot_vf = so3_utils.calc_rot_vf(rotmats_t, rotmats_1)
@@ -227,14 +237,26 @@ class MSFlowMatching(nn.Module):
         
 
         # bb aux loss
-        pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotmats_1, gen_mask)
-        gt_bb_atoms = all_atom.to_atom37(trans_gen, rotamats_gen)[:, :, :3] 
-        pred_bb_atoms = all_atom.to_atom37(pred_trans_gen, pred_rotamats_gen)[:, :, :3]
+        # pred_rotamats_gen, rotamats_gen = self.strc_loss_fn.extract_fea_from_gen(pred_rotmats, gen_mask), self.strc_loss_fn.extract_fea_from_gen(rotmats_1, gen_mask)
+        gt_bb_atoms = all_atom.to_atom37(trans_1_c, rotmats_1)[:, :, :3] 
+        pred_bb_atoms = all_atom.to_atom37(pred_trans, pred_rotmats)[:, :, :3]
         bb_atom_loss = torch.sum(
-            (gt_bb_atoms - pred_bb_atoms) ** 2 * gen_mask_sm[..., None, None],
+            (gt_bb_atoms - pred_bb_atoms) ** 2 * gen_mask[..., None, None],
             dim=(-1, -2, -3)
-        ) / (torch.sum(gen_mask_sm,dim=-1) + 1e-8) # (B,)
+        ) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         bb_atom_loss = torch.mean(bb_atom_loss)
+        
+        pred_trans = torch.where(gen_mask[..., None].bool(), pred_trans, trans_1_c)
+        pred_rotmats = torch.where(gen_mask[..., None, None].bool(), pred_rotmats, rotmats_1)
+        pred_crd_global = local_to_global(pred_rotmats, pred_trans, pred_crd)
+        
+        crd_global = local_to_global(rotmats_1, trans_1_c, crd_1)
+        
+        # pred_idg = (pred_crd_global[:, :-1] - pred_crd_global[:, 1:]).pow(2).sum(dim=[-1, -2]) # (B, L-1)
+        # gt_idg = (crd_global[:, :-1] - crd_global[:, 1:]).pow(2).sum(dim=[-1, -2]) # (B, L-1)
+        # idg_loss = torch.sum((pred_idg - gt_idg) ** 2 * gen_mask[:, 1:, None], dim=(-1, -2)) / (torch.sum(gen_mask[:, 1:], dim=-1) + 1e-8) # (B,)
+        # idg_loss = torch.mean(idg_loss)
+        
         
         # Angle Loss
         angle_1_pred, _ = get_torsion_angle_batched(pred_crd.view(B, L, 15, 3), pred_seqs_1_prob.argmax(dim=-1))
@@ -266,6 +288,8 @@ class MSFlowMatching(nn.Module):
             "bb_angle_loss": strc_loss['bb_angle_loss'] * weigeht,
             "bb_torsion_loss": strc_loss['bb_torsion_loss'] * weigeht,
             "crd_loss": crd_loss * weigeht,
+            # "idg_loss": idg_loss * weigeht,
+            "crd_dist_loss": crd_dist_loss * weigeht,
         }
         
         for key in res.keys():
@@ -286,7 +310,7 @@ class MSFlowMatching(nn.Module):
         angle_mask_loss = batch['generate_mask'][..., None]
 
         #encode
-        batch_fea = self.encode(batch)
+        batch_fea = self.extract_fea(batch)
         rotmats_1, trans_1, crd_1, seqs_1, node_embed, edge_embed = \
             batch_fea["rotmats"], batch_fea['trans'], batch_fea["crd"], batch_fea["seqs"], \
             batch_fea["node_embed"], batch_fea["edge_embed"]
@@ -320,7 +344,7 @@ class MSFlowMatching(nn.Module):
             seqs_0_simplex = seqs_1_simplex.detach().clone()
         # Sample Local Coordinates
         
-        crd_0 = torch.einsum('bik,kjc->bijc', seqs_0_prob, IDEALIZED_POS) # (B,L,14,3)
+        crd_0 = torch.einsum('bik,kjc->bijc', seqs_0_prob, IDEALIZED_POS.to(device=seqs_0_prob.device)) # (B,L,15,3)
         
 
         # Set-up time
@@ -331,7 +355,7 @@ class MSFlowMatching(nn.Module):
         rotmats_t_1, trans_t_1_c, crd_t_1, seqs_t_1, seqs_t_1_simplex = rotmats_0, trans_0_c, crd_0, seqs_0, seqs_0_simplex
 
         # denoise loop
-        for t_2 in ts[1:]:
+        for t_2 in tqdm(ts[1:], desc='Denoise', leave=False):
             t = torch.ones((num_batch, 1), device=batch['aa'].device) * t_1
             # rots
             
@@ -346,7 +370,7 @@ class MSFlowMatching(nn.Module):
             res = self.encoder(batch_fea)
             
             pred_rotmats_1, pred_trans_1, pred_crd_1, pred_seqs_1_prob = \
-                    res['pred_rotmats'], res['pred_trans'], res['pred_crd_1'], res['pred_seqs']
+                    res['pred_rotmats'], res['pred_trans'], res['pred_crd'], res['pred_seqs']
                     
             pred_rotmats_1 = torch.where(batch['generate_mask'][...,None,None],pred_rotmats_1,rotmats_1)
             # trans, move center
@@ -359,8 +383,8 @@ class MSFlowMatching(nn.Module):
             pred_seqs_1 = torch.where(batch['generate_mask'],pred_seqs_1,seqs_1)
             pred_seqs_1_simplex = self.seq_to_simplex(pred_seqs_1)
             # seq-angle
-            torsion_mask = angle_mask_loss[pred_seqs_1.reshape(-1)].reshape(num_batch,num_res,-1) # (B,L,5)
-            pred_angles_1 = torch.where(torsion_mask.bool(),pred_angles_1,torch.zeros_like(pred_angles_1))
+            # torsion_mask = angle_mask_loss[pred_seqs_1.reshape(-1)].reshape(num_batch,num_res,-1) # (B,L,5)
+            # pred_angles_1 = torch.where(torsion_mask.bool(),pred_angles_1,torch.zeros_like(pred_angles_1))
             if not sample_bb:
                 pred_trans_1_c = trans_1_c.detach().clone()
                 # _,center = self.zero_center_part(trans_1,gen_mask,res_mask)
@@ -384,7 +408,7 @@ class MSFlowMatching(nn.Module):
             # angles
             # angles_t_2 = torus.tor_geodesic_t(d_t[...,None],pred_angles_1, angles_t_1)
             # angles_t_2 = torch.where(batch['generate_mask'][...,None],angles_t_2,angles_1)
-            crd_t_2 = crd_t_1 + (pred_crd_1 - crd_0) * d_t[...,None]
+            crd_t_2 = crd_t_1 + (pred_crd_1 - crd_0) * d_t[..., None, None]
             crd_t_2 = torch.where(batch['generate_mask'][..., None, None],crd_t_2,crd_1)
             
             # seqs
@@ -414,7 +438,7 @@ class MSFlowMatching(nn.Module):
         res = self.encoder(batch_fea)
             
         pred_rotmats_1, pred_trans_1, pred_crd_1, pred_seqs_1_prob = \
-                    res['pred_rotmats'], res['pred_trans'], res['pred_crd_1'], res['pred_seqs']
+                    res['pred_rotmats'], res['pred_trans'], res['pred_crd'], res['pred_seqs']
         pred_rotmats_1 = torch.where(batch['generate_mask'][...,None,None],pred_rotmats_1,rotmats_1)
         # move center
         # pred_trans_1_c,center = self.zero_center_part(pred_trans_1,gen_mask,res_mask)
@@ -658,7 +682,7 @@ class ProteinStructureLoss(nn.Module):
         return loss
         
     
-    def forward(self, pred, target, gen_mask):
+    def forward(self, pred, target, gen_mask, poc=None, poc_mask=None):
         """
         Args:
             pred:  预测坐标 [B, L, 3]
@@ -679,6 +703,15 @@ class ProteinStructureLoss(nn.Module):
         dist_loss, clash_loss = self.dist_and_clash_loss(pred, target, mask)
         # fape_loss = self.fape_loss(pred, target, mask)
         
+        if poc is not None:
+            pred_inter_dist = torch.cdist(pred, poc, p=2)  # [B, L_ligand, L_poc]
+            gt_inter_dist = torch.cdist(target, poc, p=2)  # [B, L_ligand, L_poc]
+            dist_mask = gen_mask[:, :, None] * poc_mask[:, None, :]  # [B, L_ligand, L_poc]
+            dist_loss_inter = (pred_inter_dist - gt_inter_dist).pow(2)
+            dist_loss_inter = torch.sum(dist_loss * dist_mask, dim=(-1, -2)) / (torch.sum(dist_mask, dim=(-1, -2)) + 1e-8)  # [B]
+            dist_loss_inter = torch.mean(dist_loss)
+            
+        
         # 动态权重设置(参考Distance-AF)
         
         return {
@@ -686,6 +719,7 @@ class ProteinStructureLoss(nn.Module):
             'bb_angle_loss': angle_loss,
             'bb_torsion_loss': torsion_loss,
             'dist_loss': dist_loss,
+            'inter_dist_loss': dist_loss_inter,
             'clash_loss': clash_loss,
             # 'fape_loss': fape_loss,
         }

@@ -164,7 +164,7 @@ if __name__ == '__main__':
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--resume', type=str, default=None)
     # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/33778_last.pt")
-    parser.add_argument("--from_pretrain", type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-9a48f57]_2025_05_16__07_25_51/checkpoints/245000.pt")
+    parser.add_argument("--from_pretrain", type=str, default="logs/learn_all[main-71aac24]_2025_05_22__09_49_20/checkpoints/25000.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
 
