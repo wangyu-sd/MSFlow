@@ -1,10 +1,10 @@
 import torch
 from torch import nn
 
-from models_con import ipa_pytorch as ipa_pytorch
+from model.models_con import ipa_pytorch as ipa_pytorch
 from dm import utils as du
 
-from models_con.utils import get_index_embedding, get_time_embedding
+from model.models_con.utils import get_index_embedding, get_time_embedding
 
 from model.modules.protein.constants import ANG_TO_NM_SCALE, NM_TO_ANG_SCALE
 from model.modules.common.layers import AngularEncoding
@@ -17,14 +17,14 @@ class GAEncoder(nn.Module):
         super().__init__()
         self._ipa_conf = ipa_conf 
 
-        # rcd
-        self.rcd_embedder = nn.Linear(14*3, self._ipa_conf.c_s)
-        self.rcd_net = nn.Sequential(
+        # crd
+        self.crd_embedder = nn.Linear(15*3, self._ipa_conf.c_s)
+        self.crd_net = nn.Sequential(
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
             nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
-            nn.Linear(self._ipa_conf.c_s, 14*3)
+            nn.Linear(self._ipa_conf.c_s, 15*3)
         )
-        # self.rcd_embedder = AngularEncoding(num_funcs=12) # 25*5=120, for competitive embedding size
+        # self.crd_embedder = AngularEncoding(num_funcs=12) # 25*5=120, for competitive embedding size
         # self.angle_net = nn.Sequential(
         #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
         #     nn.Linear(self._ipa_conf.c_s, self._ipa_conf.c_s),nn.ReLU(),
@@ -97,7 +97,7 @@ class GAEncoder(nn.Module):
                 "t": t, 
                 "rotmats": rotmats_t,
                 "trans_t": trans_t,
-                "rcd_t": rcd_t, [B, L, 14, 3]
+                "crd_t": crd_t, [B, L, 14, 3]
                 "seqs_t": seqs_t,
                 "generate_mask": gen_mask,
                 "res_mask": res_mask,
@@ -107,13 +107,13 @@ class GAEncoder(nn.Module):
         Returns:
             dict: 
         """
-        t,  rotmats_t, trans_t, rcd_t, seqs_t, generate_mask, res_mask, node_embed, edge_embed = \
-            batch['t'], batch['rotmats_t'], batch['trans_t'], batch['rcd_t'], batch['seqs_t'], \
+        t,  rotmats_t, trans_t, crd_t, seqs_t, generate_mask, res_mask, node_embed, edge_embed = \
+            batch['t'], batch['rotmats_t'], batch['trans_t'], batch['crd_t'], batch['seqs_t'], \
             batch['generate_mask'], batch['res_mask'], batch['node_embed'], batch['edge_embed']
         
         
         num_batch, num_res = seqs_t.shape
-        rcd_t = rcd_t.view(num_batch, num_res, -1)
+        crd_t = crd_t.view(num_batch, num_res, -1)
         # incorperate current seq and timesteps
         node_mask = res_mask
         edge_mask = node_mask[:, None] * node_mask[:, :, None]
@@ -123,7 +123,7 @@ class GAEncoder(nn.Module):
                 node_embed, 
                 self.current_seq_embedder(seqs_t), 
                 self.embed_t(t,node_mask), 
-                self.rcd_embedder(rcd_t).reshape(num_batch,num_res,-1)],dim=-1)
+                self.crd_embedder(crd_t).reshape(num_batch,num_res,-1)],dim=-1)
             )
         
         node_embed = node_embed * node_mask[..., None]
@@ -155,13 +155,13 @@ class GAEncoder(nn.Module):
         pred_trans1 = curr_rigids.get_trans()
         pred_rotmats1 = curr_rigids.get_rots().get_rot_mats()
         pred_seqs1_prob = self.seq_net(node_embed)
-        pred_rcd = self.rcd_net(node_embed).reshape(num_batch, num_res, 14, 3)
+        pred_crd = self.crd_net(node_embed).reshape(num_batch, num_res, 15, 3)
 
         return {
             "pred_trans": pred_trans1,
             "pred_rotmats": pred_rotmats1,
             "pred_seqs": pred_seqs1_prob,
-            "pred_rcd": pred_rcd
+            "pred_crd": pred_crd
         }
 
 

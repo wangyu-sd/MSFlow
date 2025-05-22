@@ -7,6 +7,17 @@ from model.modules.common.geometry import *
 import model.modules.protein.constants as constants
 
 
+chi_atom_indices = torch.zeros((22, 4, 4), dtype=torch.long)
+for aa in range(20):
+    atoms = []
+    cur_res_name_to_idx = constants.restype_atom14_name_to_index[aa]
+    for a_idx, a in enumerate(constants.chi_angles_atoms[aa]):
+        if not a:
+            continue
+        a_indices = [cur_res_name_to_idx[sa] for sa in a]
+        chi_atom_indices[aa, a_idx] = torch.tensor(a_indices, dtype=torch.long)
+
+
 def _get_torsion_batched(p0, p1, p2, p3):
     """批量计算二面角"""
     v0 = p2 - p1  # [B, L, ..., 3]
@@ -19,31 +30,25 @@ def _get_torsion_batched(p0, p1, p2, p3):
     u2 = torch.cross(v0, v2, dim=-1)
     n2 = u2 / (torch.linalg.norm(u2, dim=-1, keepdim=True) + 1e-8)
     
-    sgn = torch.sign((torch.cross(v1, v2, dim=-1) * v0).sum(-1, keepdim=True))
+    sgn = torch.sign((torch.cross(v1, v2, dim=-1) * v0).sum(-1))
     dihed = sgn * torch.acos((n1 * n2).sum(-1).clamp(min=-0.999999, max=0.999999))
-    return dihed.squeeze(-1)
+    return dihed
 
 def get_chi_angles_batched(restype, pos14):
     """批量计算chi角 [B, L, 4]"""
     B, L = restype.shape[:2]
     device = pos14.device
-    
-    # 预加载原子索引表 [20, 4, 4]
-    chi_atom_indices = torch.stack([
-        torch.tensor([constants.restype_atom14_name_to_index[aa][a] 
-                     for a in constants.chi_angles_atoms[aa]], device=device)
-        for aa in range(20)
-    ])  # 假设氨基酸类型为0-19
-    
+        
     # 批量索引 [B, L, 4, 4]
-    atom_idx = chi_atom_indices[restype]  # restype: [B, L]
-    
+    atom_idx = chi_atom_indices.to(device=device)[restype]# restype: [B, L]
+    atom_idx = atom_idx.view(B, L, 16, 1).expand(-1, -1, -1, 3)
+    # [B, L, 15, 3] -> 
     # 收集原子坐标 [B, L, 4, 4, 3]
     p = torch.gather(
-        pos14.unsqueeze(2).expand(-1, -1, 4, -1, -1), 
-        dim=3, 
-        index=atom_idx.unsqueeze(-1).expand(-1, -1, -1, -1, 3)
-    )
+        pos14, 
+        dim=2, 
+        index=atom_idx
+    ).view(B, L, 4, 4, 3)
     
     # 批量计算二面角 [B, L, 4]
     torsions = _get_torsion_batched(
