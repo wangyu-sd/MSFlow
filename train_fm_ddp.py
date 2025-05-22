@@ -43,7 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume', type=str, default=None)
     # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/24119_last.pt")
     parser.add_argument('--from_pretrain', type=str, default=None)
-    parser.add_argument('--name', type=str, default='vq_ft')
+    parser.add_argument('--name', type=str, default='pep_flow')
     parser.add_argument('--codebook_init', default=False, action='store_true')
     # parser.add_argument('--local-rank', type=int, help='Local rank. Necessary for using the torch.distributed.launch utility.')
     args = parser.parse_args()
