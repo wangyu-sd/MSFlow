@@ -170,7 +170,6 @@ if __name__ == '__main__':
         poc_loss = sum_weighted_losses(poc_loss_dict, config.train.loss_weights)
         pep_loss = sum_weighted_losses(pep_loss_dict, config.train.loss_weights)
         loss = all_loss + poc_loss + pep_loss
-        
         # loss = loss / config.train.accum_grad
         time_forward_end = current_milli_time()
 

@@ -211,6 +211,7 @@ class MSFlowMatching(nn.Module):
         B, L = pred_crd.shape[:2]
         pred_crd, crd_1 = pred_crd.view(B, L, -1), crd_t.view(B, L, -1)
         crd_loss = torch.sum((pred_crd - crd_1)**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
+        crd_loss = torch.mean(crd_loss)
 
         # aux loss
         pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_1_c, gen_mask)
