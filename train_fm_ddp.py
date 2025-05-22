@@ -280,7 +280,7 @@ if __name__ == '__main__':
                 ckpt_path = os.path.join(ckpt_dir, '%d.pt' % it)
                 torch.save({
                     'config': config,
-                    'model': model.state_dict(),
+                    'model': model.module.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                     'iteration': it,
@@ -291,7 +291,7 @@ if __name__ == '__main__':
             ckpt_path = os.path.join(ckpt_dir, '%d_last.pt' % it)
             torch.save({
                 'config': config,
-                'model': model.state_dict(),
+                'model': model.module.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
                 'iteration': it,
