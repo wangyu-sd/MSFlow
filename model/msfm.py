@@ -246,11 +246,11 @@ class MSFlowMatching(nn.Module):
         ) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         bb_atom_loss = torch.mean(bb_atom_loss)
         
-        pred_trans = torch.where(gen_mask[..., None].bool(), pred_trans, trans_1_c)
-        pred_rotmats = torch.where(gen_mask[..., None, None].bool(), pred_rotmats, rotmats_1)
-        pred_crd_global = local_to_global(pred_rotmats, pred_trans, pred_crd)
+        # pred_trans = torch.where(gen_mask[..., None].bool(), pred_trans, trans_1_c)
+        # pred_rotmats = torch.where(gen_mask[..., None, None].bool(), pred_rotmats, rotmats_1)
+        # pred_crd_global = local_to_global(pred_rotmats, pred_trans, pred_crd)
         
-        crd_global = local_to_global(rotmats_1, trans_1_c, crd_1)
+        # crd_global = local_to_global(rotmats_1, trans_1_c, crd_1)
         
         # pred_idg = (pred_crd_global[:, :-1] - pred_crd_global[:, 1:]).pow(2).sum(dim=[-1, -2]) # (B, L-1)
         # gt_idg = (crd_global[:, :-1] - crd_global[:, 1:]).pow(2).sum(dim=[-1, -2]) # (B, L-1)
@@ -287,6 +287,7 @@ class MSFlowMatching(nn.Module):
             "clash_loss": strc_loss['clash_loss'] * weigeht,
             "bb_angle_loss": strc_loss['bb_angle_loss'] * weigeht,
             "bb_torsion_loss": strc_loss['bb_torsion_loss'] * weigeht,
+            "inter_dist_loss": strc_loss['inter_dist_loss'] * weigeht,
             "crd_loss": crd_loss * weigeht,
             # "idg_loss": idg_loss * weigeht,
             "crd_dist_loss": crd_dist_loss * weigeht,
