@@ -137,7 +137,7 @@ if __name__ == '__main__':
     optimizer = get_optimizer(config.train.optimizer, model)
     scheduler = get_scheduler(config.train.scheduler, optimizer)
     optimizer.zero_grad()
-    scaler = torch.amp.GradScaler()
+    # scaler = torch.amp.GradScaler()
     it_first = 1
 
     # Resume
@@ -153,9 +153,9 @@ if __name__ == '__main__':
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
         scheduler.load_state_dict(ckpt['scheduler'])
-        if "scaler" in ckpt:
-            logger.info('Resuming scaler states...')
-            scaler.load_state_dict(ckpt['scaler'])
+        # if "scaler" in ckpt:
+        #     logger.info('Resuming scaler states...')
+        #     scaler.load_state_dict(ckpt['scaler'])
         
         
     elif args.from_pretrain is not None:
@@ -180,8 +180,7 @@ if __name__ == '__main__':
 
         # Forward pass
         # loss_dict, metric_dict = model.get_loss(batch) # get loss and metrics
-        with torch.autocast(device_type='cuda', dtype=torch.float16):
-            all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch) # get loss and metrics  
+        all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch) # get loss and metrics  
         all_loss = sum_weighted_losses(all_loss_dict, config.train.loss_weights)
         poc_loss = sum_weighted_losses(poc_loss_dict, config.train.loss_weights)
         pep_loss = sum_weighted_losses(pep_loss_dict, config.train.loss_weights)
@@ -193,26 +192,28 @@ if __name__ == '__main__':
             logger.info('NAN Loss!')
             loss = torch.tensor(0.,requires_grad=True).to(loss.device)
 
-        # loss.backward()
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
+        orig_grad_norm = clip_grad_norm_(model.parameters(), config.train.max_grad_norm)
+        loss.backward()
+        # scaler.scale(loss).backward()
+        # scaler.unscale_(optimizer)
         # rescue for nan grad
         for param in model.module.parameters():
             if param.grad is not None:
                 if torch.isnan(param.grad).any():
                     param.grad[torch.isnan(param.grad)] = 0
 
-        orig_grad_norm = clip_grad_norm_(model.parameters(), config.train.max_grad_norm)
+        
 
         # Backward
         # if it % config.train.accum_grad ==0:
         
-        scaler.step(optimizer)
-        scaler.update()
+        # scaler.step(optimizer)
+        # scaler.update()
         
-        if scaler.get_scale() < 1e-10:
-            logger.warning("Scaler underflow detected! Resetting scaler...")
-            scaler.update(new_scale=2.**4)  # 手动重置缩放因子
+        # if scaler.get_scale() < 1e-10:
+        #     logger.warning("Scaler underflow detected! Resetting scaler...")
+        #     scaler.update(new_scale=2.**4)  # 手动重置缩放因子
+        optimizer.step()
         optimizer.zero_grad()
         
         time_backward_end = current_milli_time()
@@ -226,7 +227,7 @@ if __name__ == '__main__':
             # u_rate = (u_prob >= 1 / config.model.encoder.ipa.codebook_size / 10).sum() / u_count.shape[0]
             scalar_dict.update({
                 'grad': orig_grad_norm,
-                'scaler': scaler.get_scale(),
+                # 'scaler': scaler.get_scale(),
                 # 'coodbook_usage_rate': float(u_rate),
                 'lr': optimizer.param_groups[0]['lr'],
                 'time_forward': (time_forward_end - time_start) / 1000,
@@ -308,7 +309,7 @@ if __name__ == '__main__':
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
                 'iteration': it,
-                'scaler': scaler.state_dict(), 
+                # 'scaler': scaler.state_dict(), 
                 # 'avg_val_loss': avg_val_loss,
             }, ckpt_path)
             logger.info('Terminating...')
