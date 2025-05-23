@@ -30,6 +30,7 @@ from easydict import EasyDict
 torch.serialization.add_safe_globals([EasyDict])
 
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='/remote-home/wangyu/VQ-PAR/configs/learn_all.yaml')
@@ -99,6 +100,8 @@ if __name__ == '__main__':
         logger.info(f"可见GPU: {torch.cuda.device_count()}张")  # 应输出4
         logger.info(f"当前使用GPU: {torch.cuda.current_device()}")  
     
+    if log_dir is not None:
+        config['log_dir'] = log_dir
     # Set up DDP
     logger.info('Initializing DDP...')
     distrib.init_process_group(backend="nccl")

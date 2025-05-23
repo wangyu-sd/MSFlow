@@ -59,6 +59,7 @@ train:
     bb_torsion_loss: 0.05
     # idg_loss : 0.1
     crd_dist_loss: 0.01
+    clear_loss: 0.1
     inter_dist_loss: 0.25
     # div_loss: 0.1
     # global_rotmats_loss: 0.01

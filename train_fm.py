@@ -24,6 +24,9 @@ from model.msfm import MSFlowMatching
 from model.plot_results import plot_codebook_dist
 from easydict import EasyDict
 torch.serialization.add_safe_globals([EasyDict])
+# x = torch.tensor([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]])
+# batch = torch.tensor([0, 0, 0, 0])
+# edge_index = radius_graph(x, r=1.5, batch=batch, loop=False)
 
 
 if __name__ == '__main__':

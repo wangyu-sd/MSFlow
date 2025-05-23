@@ -166,6 +166,7 @@ if __name__ == '__main__':
     # parser.add_argument("--from_pretrain", type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-71aac24]_2025_05_22__09_49_20/checkpoints/25000.pt")
     parser.add_argument('--name', type=str, default='train_par')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
+    parser.add_argument("--sample_batch_size", type=int, default=32, help="batch size for sampling")
 
     args = parser.parse_args()
     os.makedirs(args.logdir,exist_ok=True)
@@ -210,6 +211,7 @@ if __name__ == '__main__':
     logger.info(args)
     logger.info(config)
     config['resume'] = args.resume
+    config['sample_batch_size'] = args.sample_batch_size
     
 
     # Data
@@ -222,7 +224,7 @@ if __name__ == '__main__':
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
     # train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
     # train_iterator = inf_iterator(train_loader)
-    val_loader = DataLoader(val_dataset, batch_size=config.train.batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=args.sample_batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     logger.info('Test %d' % (len(val_dataset)))
 
     # Model

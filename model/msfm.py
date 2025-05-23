@@ -22,6 +22,7 @@ from model.models_con.torsion import get_torsion_angle_batched
 IDEALIZED_POS = torch.tensor(residue_constants.restype_atom14_rigid_group_positions) # K=21, 14, 3
 IDEALIZED_POS = F.pad(IDEALIZED_POS, (0, 0, 0, 1), mode='constant', value=0.0)[:-1] # K=21, 15, 3  -> K=20, 15, 3
 from tqdm import tqdm
+from torch_geometric.nn import radius_graph
 # from model.models_con.pep_dataloader import PepDataset
 
 # from model.utils.misc import load_config
@@ -246,11 +247,15 @@ class MSFlowMatching(nn.Module):
         ) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         bb_atom_loss = torch.mean(bb_atom_loss)
         
-        # pred_trans = torch.where(gen_mask[..., None].bool(), pred_trans, trans_1_c)
-        # pred_rotmats = torch.where(gen_mask[..., None, None].bool(), pred_rotmats, rotmats_1)
-        # pred_crd_global = local_to_global(pred_rotmats, pred_trans, pred_crd)
+        pred_trans = torch.where(gen_mask[..., None].bool(), pred_trans, trans_1_c)
+        pred_rotmats = torch.where(gen_mask[..., None, None].bool(), pred_rotmats, rotmats_1)
+        pred_crd_global = local_to_global(pred_rotmats, pred_trans, pred_crd) # (B, L, 15, 3)
+        
+        clear_loss = clearance_loss(pred_crd_global, gen_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2)
         
         # crd_global = local_to_global(rotmats_1, trans_1_c, crd_1)
+        
+        
         
         # pred_idg = (pred_crd_global[:, :-1] - pred_crd_global[:, 1:]).pow(2).sum(dim=[-1, -2]) # (B, L-1)
         # gt_idg = (crd_global[:, :-1] - crd_global[:, 1:]).pow(2).sum(dim=[-1, -2]) # (B, L-1)
@@ -277,6 +282,8 @@ class MSFlowMatching(nn.Module):
         seqs_loss = torch.mean(seqs_loss)
         
         
+        
+        
         res_ =  {
             "trans_loss": trans_loss * weigeht,
             'rot_loss': rot_loss * weigeht,
@@ -289,6 +296,7 @@ class MSFlowMatching(nn.Module):
             "bb_torsion_loss": strc_loss['bb_torsion_loss'] * weigeht,
             "inter_dist_loss": strc_loss['inter_dist_loss'] * weigeht,
             "crd_loss": crd_loss * weigeht,
+            "clear_loss": clear_loss * weigeht,
             # "idg_loss": idg_loss * weigeht,
             "crd_dist_loss": crd_dist_loss * weigeht,
         }
@@ -467,6 +475,58 @@ class MSFlowMatching(nn.Module):
         
 
 
+def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2):
+    """
+    改进版原子距离约束损失函数
+    pred_crd: 预测原子坐标 [B, L, 15, 3]
+    crd_mask: 原子有效性掩码 [B, L]
+    safe_threshold: 动态安全阈值（基于网页7的工业标准调整）
+    buffer: 缓冲区宽度（网页8的分段约束思想）
+    alpha: 渐进惩罚系数（网页7的二次惩罚策略）
+    """
+    B, L, N, _ = pred_crd.shape
+    
+    # 原子掩码处理（网页5的坐标有效性验证）
+    valid_mask = crd_mask.unsqueeze(-1).expand(-1, -1, N).reshape(B*L*N)  # [B*L*N]
+    flat_crd = pred_crd.reshape(B*L*N, 3)[valid_mask]  # 过滤无效原子 [V,3]
+    batch_idx = torch.arange(B, device=pred_crd.device).repeat_interleave(L*N)[valid_mask]
+
+    # 邻域搜索优化（网页3的KNN筛选策略）
+    edge_index = radius_graph(flat_crd, 
+                            r=safe_threshold + buffer*2,  # 扩展搜索半径
+                            batch=batch_idx,
+                            loop=False,
+                            max_num_neighbors=32)
+    
+    # 有效距离计算（网页7的距离穿透因子思想）
+    src, dst = edge_index
+    pred_dist = torch.norm(flat_crd[src] - flat_crd[dst], dim=1)
+    
+    # 动态阈值调整（网页8的渐进安全策略）
+    delta = (safe_threshold - 0.1 * torch.sigmoid(pred_dist.detach())) - pred_dist
+    
+    # 分段惩罚机制（网页7的软硬约束结合）
+    violation_mask = delta > 0  # 实际违规区域
+    buffer_zone = (pred_dist > (safe_threshold - buffer)) & violation_mask
+    severe_zone = ~buffer_zone & violation_mask
+
+    # 梯度稳定处理（网页3的穿梭式梯度控制）
+    with torch.no_grad():
+        buffer_coef = (safe_threshold - pred_dist) / buffer
+    
+    # 惩罚项计算（网页4的分段函数设计）
+    buffer_penalty = torch.where(buffer_zone, 
+                               buffer_coef * delta**2, 
+                               torch.zeros_like(delta))
+    severe_penalty = torch.where(severe_zone, 
+                               delta**alpha, 
+                               torch.zeros_like(delta))
+    
+    # 对称性归一化（网页5的批次平衡策略）
+    total_loss = (buffer_penalty + severe_penalty).sum() * 0.5  # 消除双向边重复
+    valid_pairs = edge_index.shape[1] // 2  # 有效原子对数
+    
+    return total_loss / (crd_mask.sum() * N * max(valid_pairs, 1))  # 防止除零
 
 def compute_principal_axis(trans: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
     """
