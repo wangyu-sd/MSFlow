@@ -526,7 +526,7 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2
     total_loss = (buffer_penalty + severe_penalty).sum() * 0.5  # 消除双向边重复
     valid_pairs = edge_index.shape[1] // 2  # 有效原子对数
     
-    return total_loss / (crd_mask.sum() * max(valid_pairs, 1))  # 防止除零
+    return total_loss / (max(valid_pairs, 1))  # 防止除零
 
 def compute_principal_axis(trans: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
     """
