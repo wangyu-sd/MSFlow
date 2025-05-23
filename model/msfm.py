@@ -225,7 +225,7 @@ class MSFlowMatching(nn.Module):
         trans_gen = self.strc_loss_fn.extract_fea_from_gen(trans_1, gen_mask)
         gen_mask_sm = self.strc_loss_fn.extract_fea_from_gen(gen_mask, gen_mask)
         
-        poc_mask = torch.logical_and(gen_mask.bool(), res_mask.bool())
+        poc_mask = torch.logical_and(~gen_mask.bool(), res_mask.bool())
         trans_pos = self.strc_loss_fn.extract_fea_from_gen(trans_1, poc_mask)
         poc_mask = self.strc_loss_fn.extract_fea_from_gen(poc_mask, poc_mask)
         strc_loss = self.strc_loss_fn(pred_trans_gen, trans_gen, gen_mask_sm, trans_pos, poc_mask)
@@ -487,7 +487,7 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2
     B, L, N, _ = pred_crd.shape
     
     # 原子掩码处理（
-    valid_mask = crd_mask.unsqueeze(-1).expand(-1, -1, N).reshape(B*L*N)  # [B*L*N]
+    valid_mask = crd_mask.unsqueeze(-1).expand(-1, -1, N).reshape(B*L*N).bool()  # [B*L*N]
     flat_crd = pred_crd.reshape(B*L*N, 3)[valid_mask]  # 过滤无效原子 [V,3]
     batch_idx = torch.arange(B, device=pred_crd.device).repeat_interleave(L*N)[valid_mask]
 

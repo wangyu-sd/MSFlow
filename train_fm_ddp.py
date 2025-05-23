@@ -51,12 +51,16 @@ if __name__ == '__main__':
 
     args.name = args.name
     # Version control
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
     branch, version = get_version()
-    version_short = '%s-%s' % (branch, version[:7])
-    if has_changes() and not args.debug:
-        c = input('Start training anyway? (y/n) ')
-        if c != 'y':
-            exit()
+    
+    if local_rank == 0:
+        version_short = '%s-%s' % (branch, version[:7])
+        if has_changes() and not args.debug:
+            c = input('Start training anyway? (y/n) ')
+            if c != 'y':
+                exit()
 
     # Load configs
 
@@ -68,8 +72,7 @@ if __name__ == '__main__':
     seed_all(config.train.seed)
     config['device'] = args.device
     
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
+
 
 
     # Logging

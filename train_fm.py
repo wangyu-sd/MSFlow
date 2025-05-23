@@ -128,7 +128,7 @@ if __name__ == '__main__':
     # Resume
     if args.resume is not None:
         logger.info('Resuming from checkpoint: %s' % args.resume)
-        ckpt = torch.load(args.resume, map_location=f'cuda:{args.device}', weights_only=True)
+        ckpt = torch.load(args.resume, map_location=f'{args.device}', weights_only=True)
         it_first = ckpt['iteration']  # + 1
         # print(ckpt.keys())
         # print(ckpt['model'].keys())
