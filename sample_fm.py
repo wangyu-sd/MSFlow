@@ -224,7 +224,7 @@ if __name__ == '__main__':
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
     # train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
     # train_iterator = inf_iterator(train_loader)
-    val_loader = DataLoader(val_dataset, batch_size=args.sample_batch_size, shuffle=False, collate_fn=PaddingCollate(), num_workers=args.num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=args.sample_batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers)
     logger.info('Test %d' % (len(val_dataset)))
 
     # Model

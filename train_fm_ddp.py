@@ -137,7 +137,7 @@ if __name__ == '__main__':
     optimizer = get_optimizer(config.train.optimizer, model)
     scheduler = get_scheduler(config.train.scheduler, optimizer)
     optimizer.zero_grad()
-    scaler = torch.amp.GradScaler(init_scale=2.**10)
+    scaler = torch.amp.GradScaler(init_scale=2.**4)
     it_first = 1
 
     # Resume
@@ -153,9 +153,9 @@ if __name__ == '__main__':
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
         scheduler.load_state_dict(ckpt['scheduler'])
-        # if "scaler" in ckpt:
-        #     logger.info('Resuming scaler states...')
-        #     scaler.load_state_dict(ckpt['scaler'])
+        if "scaler" in ckpt:
+            logger.info('Resuming scaler states...')
+            scaler.load_state_dict(ckpt['scaler'])
         
         
     elif args.from_pretrain is not None:
@@ -194,7 +194,7 @@ if __name__ == '__main__':
 
         # loss.backward()
         scaler.scale(loss).backward()
-
+        scaler.unscale_(optimizer)
         # rescue for nan grad
         for param in model.module.parameters():
             if param.grad is not None:
@@ -220,6 +220,7 @@ if __name__ == '__main__':
             # u_rate = (u_prob >= 1 / config.model.encoder.ipa.codebook_size / 10).sum() / u_count.shape[0]
             scalar_dict.update({
                 'grad': orig_grad_norm,
+                'scaler': scaler.get_scale(),
                 # 'coodbook_usage_rate': float(u_rate),
                 'lr': optimizer.param_groups[0]['lr'],
                 'time_forward': (time_forward_end - time_start) / 1000,
