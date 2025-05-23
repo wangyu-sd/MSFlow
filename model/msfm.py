@@ -253,7 +253,7 @@ class MSFlowMatching(nn.Module):
         pred_rotmats = torch.where(gen_mask[..., None, None].bool(), pred_rotmats, rotmats_1)
         pred_crd_global = local_to_global(pred_rotmats, pred_trans, pred_crd) # (B, L, 15, 3)
         
-        clear_loss = clearance_loss(pred_crd_global, gen_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2)
+        clear_loss = clearance_loss(pred_crd_global, res_mask.bool())
         
         # crd_global = local_to_global(rotmats_1, trans_1_c, crd_1)
         
@@ -477,7 +477,7 @@ class MSFlowMatching(nn.Module):
         
 
 
-def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2):
+def clearance_loss(pred_crd, crd_mask, safe_threshold=1.5, buffer=0.3, alpha=1.5):
     """
     改进版原子距离约束损失函数
     pred_crd: 预测原子坐标 [B, L, 15, 3]
@@ -498,32 +498,29 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2
                             r=safe_threshold + buffer*2,  # 扩展搜索半径
                             batch=batch_idx,
                             loop=False,
-                            max_num_neighbors=32)
+                            max_num_neighbors=10)
     
     # 有效距离计算
     src, dst = edge_index
     pred_dist = torch.sqrt(
         (flat_crd[src] - flat_crd[dst]).pow(2).sum(dim=1) + 1e-6)  
     
-    # 动态阈值调整
-    delta = (safe_threshold - 0.1 * torch.sigmoid(pred_dist.detach())) - pred_dist
-    delta = (safe_threshold - pred_dist).clamp(min=-2.0, max=5.0) 
+    # 动态阈值与掩码
+    delta = (safe_threshold - pred_dist)
+    bond_mask = (pred_dist > 1.0) & (pred_dist < 2.0)
+    violation_mask = (delta > 0) & ~bond_mask
     
-    # 分段惩罚机制
-    violation_mask = delta > 0  # 实际违规区域
+    # 区域划分
     buffer_zone = (pred_dist > (safe_threshold - buffer)) & violation_mask
     severe_zone = ~buffer_zone & violation_mask
-
-    # 梯度稳定处理
-    with torch.no_grad():
-        buffer_coef = (safe_threshold - pred_dist) / buffer
     
-    # 惩罚项计算
+    # 梯度稳定惩罚
     buffer_penalty = torch.where(buffer_zone, 
-                               buffer_coef * delta**2, 
-                               torch.zeros_like(delta))
-    severe_penalty = torch.where(severe_zone, 
-        torch.where(delta > 1.0, delta, 0.5*delta**2), 0.0)
+                               (safe_threshold - pred_dist)/buffer * delta**2, 
+                               0.0)
+    severe_penalty = torch.where(severe_zone,
+                               torch.where(delta > 0.5, delta, 0.5*delta**2),
+                               0.0)
     
     # 对称性归一化
     total_loss = (buffer_penalty + severe_penalty).sum() * 0.5  # 消除双向边重复
