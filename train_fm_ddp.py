@@ -137,7 +137,7 @@ if __name__ == '__main__':
     optimizer = get_optimizer(config.train.optimizer, model)
     scheduler = get_scheduler(config.train.scheduler, optimizer)
     optimizer.zero_grad()
-    scaler = torch.amp.GradScaler(init_scale=2.**4)
+    scaler = torch.amp.GradScaler()
     it_first = 1
 
     # Resume
