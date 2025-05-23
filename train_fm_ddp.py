@@ -137,7 +137,7 @@ if __name__ == '__main__':
     optimizer = get_optimizer(config.train.optimizer, model)
     scheduler = get_scheduler(config.train.scheduler, optimizer)
     optimizer.zero_grad()
-    scaler = torch.amp.GradScaler()
+    scaler = torch.amp.GradScaler(init_scale=2.**10)
     it_first = 1
 
     # Resume
@@ -153,9 +153,9 @@ if __name__ == '__main__':
         optimizer.load_state_dict(ckpt['optimizer'])
         logger.info('Resuming scheduler states...')
         scheduler.load_state_dict(ckpt['scheduler'])
-        if "scaler" in ckpt:
-            logger.info('Resuming scaler states...')
-            scaler.load_state_dict(ckpt['scaler'])
+        # if "scaler" in ckpt:
+        #     logger.info('Resuming scaler states...')
+        #     scaler.load_state_dict(ckpt['scaler'])
         
         
     elif args.from_pretrain is not None:

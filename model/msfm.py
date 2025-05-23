@@ -287,7 +287,7 @@ class MSFlowMatching(nn.Module):
         
         
         res_ =  {
-            "trans_loss": trans_loss * weigeht,
+            "trans_loss": trans_loss * weigeht, 
             'rot_loss': rot_loss * weigeht,
             'bb_atom_loss': bb_atom_loss * weigeht,
             'seqs_loss': seqs_loss * weigeht,
