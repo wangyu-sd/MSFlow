@@ -480,41 +480,41 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2
     改进版原子距离约束损失函数
     pred_crd: 预测原子坐标 [B, L, 15, 3]
     crd_mask: 原子有效性掩码 [B, L]
-    safe_threshold: 动态安全阈值（基于网页7的工业标准调整）
-    buffer: 缓冲区宽度（网页8的分段约束思想）
-    alpha: 渐进惩罚系数（网页7的二次惩罚策略）
+    safe_threshold: 动态安全阈值
+    buffer: 缓冲区宽度
+    alpha: 渐进惩罚系数
     """
     B, L, N, _ = pred_crd.shape
     
-    # 原子掩码处理（网页5的坐标有效性验证）
+    # 原子掩码处理（
     valid_mask = crd_mask.unsqueeze(-1).expand(-1, -1, N).reshape(B*L*N)  # [B*L*N]
     flat_crd = pred_crd.reshape(B*L*N, 3)[valid_mask]  # 过滤无效原子 [V,3]
     batch_idx = torch.arange(B, device=pred_crd.device).repeat_interleave(L*N)[valid_mask]
 
-    # 邻域搜索优化（网页3的KNN筛选策略）
+    # 邻域搜索优化
     edge_index = radius_graph(flat_crd, 
                             r=safe_threshold + buffer*2,  # 扩展搜索半径
                             batch=batch_idx,
                             loop=False,
                             max_num_neighbors=32)
     
-    # 有效距离计算（网页7的距离穿透因子思想）
+    # 有效距离计算
     src, dst = edge_index
     pred_dist = torch.norm(flat_crd[src] - flat_crd[dst], dim=1)
     
-    # 动态阈值调整（网页8的渐进安全策略）
+    # 动态阈值调整
     delta = (safe_threshold - 0.1 * torch.sigmoid(pred_dist.detach())) - pred_dist
     
-    # 分段惩罚机制（网页7的软硬约束结合）
+    # 分段惩罚机制
     violation_mask = delta > 0  # 实际违规区域
     buffer_zone = (pred_dist > (safe_threshold - buffer)) & violation_mask
     severe_zone = ~buffer_zone & violation_mask
 
-    # 梯度稳定处理（网页3的穿梭式梯度控制）
+    # 梯度稳定处理
     with torch.no_grad():
         buffer_coef = (safe_threshold - pred_dist) / buffer
     
-    # 惩罚项计算（网页4的分段函数设计）
+    # 惩罚项计算
     buffer_penalty = torch.where(buffer_zone, 
                                buffer_coef * delta**2, 
                                torch.zeros_like(delta))
@@ -522,11 +522,11 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2
                                delta**alpha, 
                                torch.zeros_like(delta))
     
-    # 对称性归一化（网页5的批次平衡策略）
+    # 对称性归一化
     total_loss = (buffer_penalty + severe_penalty).sum() * 0.5  # 消除双向边重复
     valid_pairs = edge_index.shape[1] // 2  # 有效原子对数
     
-    return total_loss / (crd_mask.sum() * N * max(valid_pairs, 1))  # 防止除零
+    return total_loss / (crd_mask.sum() * max(valid_pairs, 1))  # 防止除零
 
 def compute_principal_axis(trans: torch.Tensor, node_mask: torch.Tensor) -> torch.Tensor:
     """
