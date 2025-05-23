@@ -767,24 +767,27 @@ class ProteinStructureLoss(nn.Module):
         dist_loss, clash_loss = self.dist_and_clash_loss(pred, target, mask)
         # fape_loss = self.fape_loss(pred, target, mask)
         
+        
         if poc is not None:
             pred_inter_dist = torch.cdist(pred, poc, p=2)  # [B, L_ligand, L_poc]
             gt_inter_dist = torch.cdist(target, poc, p=2)  # [B, L_ligand, L_poc]
             dist_mask = gen_mask[:, :, None] * poc_mask[:, None, :]  # [B, L_ligand, L_poc]
             dist_loss_inter = (pred_inter_dist - gt_inter_dist).pow(2)
-            dist_loss_inter = torch.sum(dist_loss * dist_mask, dim=(-1, -2)) / (torch.sum(dist_mask, dim=(-1, -2)) + 1e-8)  # [B]
-            dist_loss_inter = torch.mean(dist_loss)
+            dist_loss_inter = torch.sum(dist_loss_inter * dist_mask, dim=(-1, -2)) / (torch.sum(dist_mask, dim=(-1, -2)) + 1e-8)  # [B]
+            dist_loss_inter = torch.mean(dist_loss_inter)
             
-        
-        # 动态权重设置(参考Distance-AF)
-        
+            mask_clash = (pred_inter_dist < 3.8) & (pred_inter_dist > 2.0)
+            clash_loss_inter = torch.where(mask_clash, (3.8 - pred_inter_dist).pow(2), 0.0)
+            clash_loss_inter = torch.sum(clash_loss * dist_mask, dim=(-1, -2)) / (torch.sum(dist_mask, dim=(-1, -2)) + 1e-8)
+            
+             
         return {
             # 'pos_loss': pos_loss,
             'bb_angle_loss': angle_loss,
             'bb_torsion_loss': torsion_loss,
             'dist_loss': dist_loss,
             'inter_dist_loss': dist_loss_inter,
-            'clash_loss': clash_loss,
+            'clash_loss': clash_loss + clash_loss_inter.mean(),
             # 'fape_loss': fape_loss,
         }
         
