@@ -216,7 +216,7 @@ class MSFlowMatching(nn.Module):
         pred_crd_dist = torch.cdist(pred_crd.view(B*L, -1, 3), pred_crd.view(B*L, -1, 3), p=2) # (BL, A, A)
         gt_crd_dist = torch.cdist(crd_1.view(B*L, -1, 3), crd_1.view(B*L, -1, 3), p=2) # (BL,A, A)
         
-        crd_dist_loss = (pred_crd_dist - gt_crd_dist).pow(2).sum(dim=[1, 2]).view(B, L)
+        crd_dist_loss = (pred_crd_dist - gt_crd_dist).pow(2).mean(dim=[1, 2]).view(B, L) * 3
         crd_dist_loss = torch.sum(crd_dist_loss * gen_mask, dim=-1) / (torch.sum(gen_mask, dim=-1) + 1e-8) # (B,)
         crd_dist_loss = torch.mean(crd_dist_loss)
 
