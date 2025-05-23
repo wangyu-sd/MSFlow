@@ -213,12 +213,14 @@ class MSFlowMatching(nn.Module):
         crd_loss = torch.sum((pred_crd.view(B, L, -1) - crd_1.reshape(B, L, -1))**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         crd_loss = torch.mean(crd_loss)
         
-        pred_crd_dist = torch.cdist(pred_crd.view(B*L, -1, 3), pred_crd.view(B*L, -1, 3), p=2) # (BL, A, A)
-        gt_crd_dist = torch.cdist(crd_1.view(B*L, -1, 3), crd_1.view(B*L, -1, 3), p=2) # (BL,A, A)
-        
-        crd_dist_loss = (pred_crd_dist - gt_crd_dist).pow(2).mean(dim=[1, 2]).view(B, L) * 3
-        crd_dist_loss = torch.sum(crd_dist_loss * gen_mask, dim=-1) / (torch.sum(gen_mask, dim=-1) + 1e-8) # (B,)
-        crd_dist_loss = torch.mean(crd_dist_loss)
+        with torch.autocast(device_type='cuda', dtype=torch.float16):
+            pred_crd_dist = torch.cdist(pred_crd.view(B*L, -1, 3), pred_crd.view(B*L, -1, 3), p=2) # (BL, A, A)
+            gt_crd_dist = torch.cdist(crd_1.view(B*L, -1, 3), crd_1.view(B*L, -1, 3), p=2) # (BL,A, A)
+            crd_dist_loss = (pred_crd_dist - gt_crd_dist).pow(2).mean(dim=[1, 2]).view(B, L) * 3
+            crd_dist_loss = torch.sum(crd_dist_loss * gen_mask, dim=-1) / (torch.sum(gen_mask, dim=-1) + 1e-8) # (B,)
+            crd_dist_loss = torch.mean(crd_dist_loss)
+            
+        crd_dist_loss = crd_dist_loss.float()
 
         # aux loss
         pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_1_c, gen_mask)
@@ -500,10 +502,12 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2
     
     # 有效距离计算
     src, dst = edge_index
-    pred_dist = torch.norm(flat_crd[src] - flat_crd[dst], dim=1)
+    pred_dist = torch.sqrt(
+        (flat_crd[src] - flat_crd[dst]).pow(2).sum(dim=1) + 1e-6)  
     
     # 动态阈值调整
     delta = (safe_threshold - 0.1 * torch.sigmoid(pred_dist.detach())) - pred_dist
+    delta = (safe_threshold - pred_dist).clamp(min=-2.0, max=5.0) 
     
     # 分段惩罚机制
     violation_mask = delta > 0  # 实际违规区域
@@ -519,8 +523,7 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=3.0, buffer=0.6, alpha=2.2
                                buffer_coef * delta**2, 
                                torch.zeros_like(delta))
     severe_penalty = torch.where(severe_zone, 
-                               delta**alpha, 
-                               torch.zeros_like(delta))
+        torch.where(delta > 1.0, delta, 0.5*delta**2), 0.0)
     
     # 对称性归一化
     total_loss = (buffer_penalty + severe_penalty).sum() * 0.5  # 消除双向边重复
