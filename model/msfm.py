@@ -213,14 +213,14 @@ class MSFlowMatching(nn.Module):
         crd_loss = torch.sum((pred_crd.view(B, L, -1) - crd_1.reshape(B, L, -1))**2*gen_mask[...,None],dim=(-1,-2)) / (torch.sum(gen_mask,dim=-1) + 1e-8) # (B,)
         crd_loss = torch.mean(crd_loss)
         
-        with torch.autocast(device_type='cuda', dtype=torch.float16):
+        with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             pred_crd_dist = torch.cdist(pred_crd.view(B*L, -1, 3), pred_crd.view(B*L, -1, 3), p=2) # (BL, A, A)
             gt_crd_dist = torch.cdist(crd_1.view(B*L, -1, 3), crd_1.view(B*L, -1, 3), p=2) # (BL,A, A)
             crd_dist_loss = (pred_crd_dist - gt_crd_dist).pow(2).mean(dim=[1, 2]).view(B, L) * 3
             crd_dist_loss = torch.sum(crd_dist_loss * gen_mask, dim=-1) / (torch.sum(gen_mask, dim=-1) + 1e-8) # (B,)
             crd_dist_loss = torch.mean(crd_dist_loss)
             
-        crd_dist_loss = crd_dist_loss.float()
+        # crd_dist_loss = crd_dist_loss.float()
 
         # aux loss
         pred_trans_gen = self.strc_loss_fn.extract_fea_from_gen(pred_trans_1_c, gen_mask)
@@ -562,36 +562,6 @@ def compute_principal_axis(trans: torch.Tensor, node_mask: torch.Tensor) -> torc
     
     return eigenvectors.transpose(1, 2)  # [B, 3, 3]
 
-def align_to_principal_axis(
-    trans: torch.Tensor, 
-    rotation: torch.Tensor,
-    node_mask: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    输入：
-        trans: [B, N, 3] 位置矩阵
-        rotation: [B, N, 3, 3] 原始旋转矩阵
-        node_mask: [B, N] 有效点掩码
-    输出：
-        aligned_trans: [B, N, 3] 标准化后的位置
-        aligned_rotation: [B, N, 3, 3] 标准化后的旋转矩阵
-    """
-    B, N = trans.shape[:2]
-    
-    # 计算全局旋转矩阵
-    global_rot = compute_principal_axis(trans, node_mask)  # [B, 3, 3]
-    global_rot_inv = global_rot.transpose(1, 2)  # 逆矩阵
-    
-    # 应用全局旋转到每个点
-    centroid = torch.mean(trans * node_mask.unsqueeze(-1), dim=1, keepdim=True)  # [B, 1, 3]
-    aligned_trans = torch.einsum('bij,bnj->bni', global_rot_inv, trans - centroid)  # [B, N, 3]
-    
-    # 更新旋转矩阵（张量旋转方法）
-    aligned_rotation = torch.einsum('bnij,bnjk->bnik', rotation, global_rot_inv.unsqueeze(1).expand(B, N, 3, 3))  # [B, N, 3, 3]
-    
-    return aligned_trans, aligned_rotation
-
-
 
 def clampped_one_hot(x, num_classes):
     mask = (x >= 0) & (x < num_classes) # (N, L)
@@ -668,7 +638,7 @@ class ProteinStructureLoss(nn.Module):
         cos_theta = torch.sum(v1 * v2, dim=-1) / (
             torch.norm(v1, dim=-1) * torch.norm(v2, dim=-1) + 1e-6
         )
-        return torch.acos(torch.clamp(cos_theta, -1.0, 1.0))  # [B, L-2]
+        return torch.acos(torch.clamp(cos_theta, -1.0+1e-6, 1.0-1e-6))  # [B, L-2]
     
     def compute_dihedrals(self, coords):
         """计算四个连续Cα的二面角 (phi/psi)"""
@@ -687,7 +657,7 @@ class ProteinStructureLoss(nn.Module):
         cos_phi = torch.sum(n1 * n2, dim=-1) / (
             torch.norm(n1, dim=-1) * torch.norm(n2, dim=-1) + 1e-6
         )
-        phi = torch.acos(torch.clamp(cos_phi, -1.0, 1.0))
+        phi = torch.acos(torch.clamp(cos_phi, -1.0+1e-6, 1.0-1e-6))
         
         # 判断方向
         sign = torch.sign(torch.sum(torch.linalg.cross(n1, n2) * v2, dim=-1))

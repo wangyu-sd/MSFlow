@@ -24,13 +24,13 @@ def _get_torsion_batched(p0, p1, p2, p3):
     v1 = p0 - p1
     v2 = p3 - p2
     
-    u1 = torch.cross(v0, v1, dim=-1)
-    n1 = u1 / (torch.linalg.norm(u1, dim=-1, keepdim=True) + 1e-8)
+    u1 = torch.linalg.cross(v0, v1, dim=-1)
+    n1 = u1 / (torch.linalg.norm(u1, dim=-1, keepdim=True) + 1e-6)
     
-    u2 = torch.cross(v0, v2, dim=-1)
-    n2 = u2 / (torch.linalg.norm(u2, dim=-1, keepdim=True) + 1e-8)
+    u2 = torch.linalg.cross(v0, v2, dim=-1)
+    n2 = u2 / (torch.linalg.norm(u2, dim=-1, keepdim=True) + 1e-6)
     
-    sgn = torch.sign((torch.cross(v1, v2, dim=-1) * v0).sum(-1))
+    sgn = torch.sign((torch.linalg.cross(v1, v2, dim=-1) * v0).sum(-1))
     dihed = sgn * torch.acos((n1 * n2).sum(-1).clamp(min=-0.999999, max=0.999999))
     return dihed
 
@@ -110,11 +110,11 @@ def _get_torsion(p0, p1, p2, p3):
     v0 = p2 - p1
     v1 = p0 - p1
     v2 = p3 - p2
-    u1 = torch.cross(v0, v1, dim=-1)
-    n1 = u1 / torch.linalg.norm(u1, dim=-1, keepdim=True)
-    u2 = torch.cross(v0, v2, dim=-1)
-    n2 = u2 / torch.linalg.norm(u2, dim=-1, keepdim=True)
-    sgn = torch.sign( (torch.cross(v1, v2, dim=-1) * v0).sum(-1) )
+    u1 = torch.linalg.cross(v0, v1, dim=-1)
+    n1 = u1 / (torch.linalg.norm(u1, dim=-1, keepdim=True) + 1e-6)
+    u2 = torch.linalg.cross(v0, v2, dim=-1)
+    n2 = u2 / (torch.linalg.norm(u2, dim=-1, keepdim=True) + 1e-6)
+    sgn = torch.sign( (torch.linalg.cross(v1, v2, dim=-1) * v0).sum(-1) )
     dihed = sgn*torch.acos( (n1 * n2).sum(-1).clamp(min=-0.999999, max=0.999999))
     return dihed
 

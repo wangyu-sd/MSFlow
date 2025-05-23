@@ -13,8 +13,8 @@ from tqdm.auto import tqdm
 
 USE_DDP = True
 from torch.utils.data.distributed import DistributedSampler
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
+# torch.backends.cuda.matmul.allow_tf32 = True
+# torch.backends.cudnn.allow_tf32 = True
 
 from model.utils.vc import get_version, has_changes
 from model.utils.misc import BlackHole, inf_iterator, load_config, seed_all, get_logger, get_new_log_dir, current_milli_time
@@ -28,7 +28,7 @@ from model.msfm import MSFlowMatching
 from model.plot_results import plot_codebook_dist
 from easydict import EasyDict
 torch.serialization.add_safe_globals([EasyDict])
-
+# torch.autograd.set_detect_anomaly(True)  
 
 
 if __name__ == '__main__':
@@ -45,7 +45,7 @@ if __name__ == '__main__':
     # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/24119_last.pt")
     parser.add_argument('--from_pretrain', type=str, default=None)
     parser.add_argument('--name', type=str, default='pep_flow')
-    parser.add_argument('--codebook_init', default=False, action='store_true')
+    # parser.add_argument('--codebook_init', default=False, action='store_true')
     # parser.add_argument('--local-rank', type=int, help='Local rank. Necessary for using the torch.distributed.launch utility.')
     args = parser.parse_args()
 
@@ -192,17 +192,17 @@ if __name__ == '__main__':
             logger.info('NAN Loss!')
             loss = torch.tensor(0.,requires_grad=True).to(loss.device)
 
-        orig_grad_norm = clip_grad_norm_(model.parameters(), config.train.max_grad_norm)
+        
         loss.backward()
         # scaler.scale(loss).backward()
         # scaler.unscale_(optimizer)
         # rescue for nan grad
-        for param in model.module.parameters():
-            if param.grad is not None:
-                if torch.isnan(param.grad).any():
-                    param.grad[torch.isnan(param.grad)] = 0
-
-        
+        # for name, param in model.module.named_parameters():
+        #     if param.grad is not None:
+        #         if torch.isnan(param.grad).any():
+        #             param.grad[torch.isnan(param.grad)] = 0
+        #             if local_rank == 0:
+        #                 logger.warning(f"{name} gradient is NaN, set to 0")
 
         # Backward
         # if it % config.train.accum_grad ==0:
@@ -213,6 +213,7 @@ if __name__ == '__main__':
         # if scaler.get_scale() < 1e-10:
         #     logger.warning("Scaler underflow detected! Resetting scaler...")
         #     scaler.update(new_scale=2.**4)  # 手动重置缩放因子
+        orig_grad_norm = clip_grad_norm_(model.parameters(), config.train.max_grad_norm)
         optimizer.step()
         optimizer.zero_grad()
         
@@ -227,6 +228,7 @@ if __name__ == '__main__':
             # u_rate = (u_prob >= 1 / config.model.encoder.ipa.codebook_size / 10).sum() / u_count.shape[0]
             scalar_dict.update({
                 'grad': orig_grad_norm,
+                'loss': loss.item(),
                 # 'scaler': scaler.get_scale(),
                 # 'coodbook_usage_rate': float(u_rate),
                 'lr': optimizer.param_groups[0]['lr'],
