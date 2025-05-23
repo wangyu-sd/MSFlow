@@ -503,7 +503,7 @@ def clearance_loss(pred_crd, crd_mask, safe_threshold=1.5, buffer=0.3, alpha=1.5
     # 有效距离计算
     src, dst = edge_index
     pred_dist = torch.sqrt(
-        (flat_crd[src] - flat_crd[dst]).pow(2).sum(dim=1) + 1e-6)  
+        (flat_crd[src] - flat_crd[dst]).pow(2).sum(dim=1) + 1e-3)  
     
     # 动态阈值与掩码
     delta = (safe_threshold - pred_dist)

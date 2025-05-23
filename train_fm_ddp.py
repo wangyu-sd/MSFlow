@@ -174,13 +174,14 @@ if __name__ == '__main__':
     def train(it, mode):
         time_start = current_milli_time()
         model.train()
-
+        
         # Prepare data
         batch = recursive_to(next(train_iterator), local_rank)
 
         # Forward pass
         # loss_dict, metric_dict = model.get_loss(batch) # get loss and metrics
-        all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch) # get loss and metrics  
+        with torch.autocast(device_type='cuda', dtype=torch.float16):
+            all_loss_dict, poc_loss_dict, pep_loss_dict = model(batch) # get loss and metrics  
         all_loss = sum_weighted_losses(all_loss_dict, config.train.loss_weights)
         poc_loss = sum_weighted_losses(poc_loss_dict, config.train.loss_weights)
         pep_loss = sum_weighted_losses(pep_loss_dict, config.train.loss_weights)
@@ -208,7 +209,12 @@ if __name__ == '__main__':
         
         scaler.step(optimizer)
         scaler.update()
+        
+        if scaler.get_scale() < 1e-10:
+            logger.warning("Scaler underflow detected! Resetting scaler...")
+            scaler.update(new_scale=2.**4)  # 手动重置缩放因子
         optimizer.zero_grad()
+        
         time_backward_end = current_milli_time()
 
         if local_rank == 0:
