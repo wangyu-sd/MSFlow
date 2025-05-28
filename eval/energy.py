@@ -5,8 +5,7 @@ from pyrosetta.rosetta.protocols.analysis import InterfaceAnalyzerMover
 from pyrosetta.rosetta.core.pack.task import TaskFactory
 from pyrosetta.rosetta.core.pack.task.operation import RestrictToRepacking
 from pyrosetta.rosetta.protocols.minimization_packing import PackRotamersMover
-
-
+import torch
 import os
 import pandas as pd
 import subprocess
@@ -16,7 +15,7 @@ from tqdm import tqdm
 import pickle
 
 from joblib import delayed, Parallel
-from utils import *
+from eval.utils import *
 
 input_dir=".Tests"
 output_dir="./Pack"
@@ -31,35 +30,43 @@ def get_chain_dic(input_pdb):
 
     return chain_dic
 
-def get_rosetta_score_base(pdb_path,chain_id='A'):
-    try:
-        init()
-        pose = pyrosetta.pose_from_pdb(pdb_path)
-        chains = list(get_chain_dic(pdb_path).keys())
-        chains.remove(chain_id)
-        interface = f'{chain_id}_{"".join(chains)}'
-        fast_relax = FastRelax() # cant be pickled
-        scorefxn = get_fa_scorefxn()
-        fast_relax.set_scorefxn(scorefxn)
-        mover = InterfaceAnalyzerMover(interface)
-        mover.set_pack_separated(True)
-        stabs,binds = [],[]
-        for i in range(5):
-            fast_relax.apply(pose)
-            stab = scorefxn(pose)
-            mover.apply(pose)
-            bind = pose.scores['dG_separated']
-            stabs.append(stab)
-            binds.append(bind)
-        return {'name':pdb_path,'stab':np.array(stabs).mean(),'bind':np.array(binds).mean()}
-    except:
-        return {'name':pdb_path,'stab':999.0,'bind':999.0}
+def get_rosetta_score_base(pdb_path,chain_id='A', iter=1):
+    # try:
+    init("-mute all -ex1 -ex2 -constant_seed", silent=True)
+    keep_backbone_atoms(pdb_path, f'{pdb_path[:-4]}_temp.pdb')
+    pose = pyrosetta.pose_from_pdb(f'{pdb_path[:-4]}_temp.pdb')
+    chains = list(get_chain_dic(pdb_path).keys())
+    chains.remove(chain_id)
+    interface = f'{chain_id}_{"".join(chains)}'
+    # print(f'Interface: {interface}')
+    fast_relax = FastRelax() # cant be pickled
+    scorefxn = get_fa_scorefxn()
+    fast_relax.set_scorefxn(scorefxn)
+    mover = InterfaceAnalyzerMover(interface)
+    mover.set_pack_separated(True)
+    stabs,binds = [],[]
+    for i in range(iter):
+        fast_relax.apply(pose)
+        stab = scorefxn(pose)
+        mover.apply(pose)
+        bind = pose.scores['dG_separated']
+        stabs.append(stab)
+        binds.append(bind)
+    os.remove(f'{pdb_path[:-4]}_temp.pdb')
+    return {'name':pdb_path,'stab':np.array(stabs).mean(),'bind':np.array(binds).mean()}
+    # except KeyboardInterrupt:
+    #     print("KeyboardInterrupt: Exiting...")
+    #     exit(0)
+    # except Exception as e:
+    #     print(f"Error processing {pdb_path}: {e}")
+    #     return {'name':pdb_path,'stab':999.0,'bind':999.0}
 
 
 def get_rosetta_score(pdb_path,chain='A'):
     try:
         init()
-        pose = pyrosetta.pose_from_pdb(pdb_path)
+        temp_pdb = keep_backbone_atoms(pdb_path, f'./_temp_{pdb_path[:-4]}.pdb')
+        pose = pyrosetta.pose_from_pdb(temp_pdb)
         # chains = list(get_chain_dic(os.path.join(input_dir,name,'pocket_merge_renum.pdb')).keys())
         # chains.remove(chain)
         # interface = f'{chain}_{"".join(chains)}'
@@ -74,6 +81,9 @@ def get_rosetta_score(pdb_path,chain='A'):
         mover.apply(pose)
         dg = pose.scores['dG_separated']
         return [pdb_path,energy,dg]
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt: Exiting...")
+        exit(0)
     except:
         return [pdb_path,999.0,999.0]
 

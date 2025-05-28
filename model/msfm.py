@@ -279,7 +279,7 @@ class MSFlowMatching(nn.Module):
         
         
         # seqs vf loss
-        seqs_loss = F.cross_entropy(pred_seqs_1_prob.view(-1,pred_seqs_1_prob.shape[-1]),torch.clamp(seqs_1,0,19).view(-1), reduction='none').view(pred_seqs_1_prob.shape[:-1]) # (N,L), not softmax
+        seqs_loss = F.cross_entropy(pred_seqs_1_prob.view(-1,pred_seqs_1_prob.shape[-1]), torch.clamp(seqs_1,0,19).view(-1), reduction='none').view(pred_seqs_1_prob.shape[:-1]) # (N,L), not softmax
         seqs_loss = torch.sum(seqs_loss * gen_mask, dim=-1) / (torch.sum(gen_mask,dim=-1) + 1e-8)
         seqs_loss = torch.mean(seqs_loss)
         
@@ -315,11 +315,13 @@ class MSFlowMatching(nn.Module):
 
         num_batch, num_res = batch['aa'].shape
         gen_mask,res_mask = batch['generate_mask'],batch['res_mask']
+
         K = self._interpolant_cfg.seqs.num_classes
         k = self._interpolant_cfg.seqs.simplex_value
         # angle_mask_loss = torsions_mask.to(batch['aa'].device)
         angle_mask_loss = batch['generate_mask'][..., None]
 
+        batch['aa'][batch['generate_mask']] = 21
         #encode
         batch_fea = self.extract_fea(batch)
         rotmats_1, trans_1, crd_1, seqs_1, node_embed, edge_embed = \

@@ -96,6 +96,7 @@ def keep_backbone_atoms(input_file, output_file):
     class BackboneSelect(Select):
         def accept_atom(self, atom):
             return atom.get_name() in ["N", "CA", "C", "O"]
+            # return atom.get_name() in ["N, CA"]
     
     parser = PDBParser()
     io = PDBIO()

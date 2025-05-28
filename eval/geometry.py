@@ -93,8 +93,8 @@ def get_ss(traj1,traj2):
 def get_bind_site(pdb,chain_id):
     parser = PDBParser()
     structure = parser.get_structure('X', pdb)[0]
-    peps = [atom for res in structure[chain_id] for atom in res if atom.get_name() == 'CA']
-    recs = [atom for chain in structure if chain.get_id()!=chain_id for res in chain for atom in res if atom.get_name() == 'CA']
+    peps = [atom for res in structure[chain_id] for atom in res if atom.name == 'CA']
+    recs = [atom for chain in structure if chain.get_id()!=chain_id for res in chain for atom in res if atom.name == 'CA']
     # print(recs)
     search = NeighborSearch(recs)
     near_res = []
@@ -109,9 +109,10 @@ def get_bind_ratio(pdb1, pdb2, chain_id1, chain_id2):
     # print(near_res2)
     return len(near_res1.intersection(near_res2))/(len(near_res2)+1e-10) # last one is gt
 
-def get_dihedral(pdb,chain):
-    traj = get_traj_chain(pdb,chain)
-    #TODO: dihedral
+def get_chis(pdb,chain):
+    traj = get_traj_chain(pdb, chain)
+    # Get the 4 chi angles for the side chains:
+    chi_angles = ...
 
 def get_seq(pdb,chain_id):
     parser = PDBParser()

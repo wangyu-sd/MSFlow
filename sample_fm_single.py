@@ -96,9 +96,7 @@ if __name__ == '__main__':
     
     config, config_name = load_config(args.config)
     seed_all(config.train.seed)
-    
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
+
 
 
     # Logging
@@ -126,9 +124,6 @@ if __name__ == '__main__':
     config['resume'] = args.resume
     config['sample_batch_size'] = args.sample_batch_size
     
-    if local_rank == 0:
-        logger.info(f"可见GPU: {torch.cuda.device_count()}张")  # 应输出4
-        logger.info(f"当前使用GPU: {torch.cuda.current_device()}")  
     
     if log_dir is not None:
         config['log_dir'] = log_dir
@@ -147,11 +142,10 @@ if __name__ == '__main__':
     
     evaluation_dataset = PepDataset(structure_dir = config.dataset.val.structure_dir, dataset_dir = config.dataset.val.dataset_dir,
                                             name = config.dataset.val.name, transform=None, reset=config.dataset.val.reset)
-    sampler = DistributedSampler(evaluation_dataset, shuffle=True)
     # train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
     # train_iterator = inf_iterator(train_loader)
     # val_loader = DataLoader(evaluation_dataset, batch_size=args.sample_batch_size, shuffle=True, collate_fn=PaddingCollate(), num_workers=args.num_workers)
-    eval_loader = DataLoader(evaluation_dataset, batch_size=args.sample_batch_size, collate_fn=PaddingCollate(), sampler=sampler, num_workers=args.num_workers, pin_memory=True)
+    eval_loader = DataLoader(evaluation_dataset, batch_size=args.sample_batch_size, collate_fn=PaddingCollate(), num_workers=args.num_workers, pin_memory=True)
     logger.info('Test %d' % (len(evaluation_dataset)))
 
     # Model
@@ -159,11 +153,10 @@ if __name__ == '__main__':
     # model = get_model(config.model).to(args.device)
     # model_vq = VQPAE(config.model).to(args.device)
     logger.info('Load resume model from checkpoint: %s' % args.resume)
-    ckpt = torch.load(args.resume, map_location=f"cuda:{local_rank}", weights_only=True)
+    ckpt = torch.load(args.resume, map_location=args.device, weights_only=True)
     ckpt['model'] = {k.replace('module.', ''): v for k,v in ckpt['model'].items()}
-    model = MSFlowMatching(ckpt['config'].model).to(device=local_rank)  
+    model = MSFlowMatching(ckpt['config'].model).to(device=args.device)  
     model.load_state_dict(ckpt['model'])
-    model = DDP(model, device_ids=[local_rank])
     logger.info('Done!')
     
     
@@ -193,7 +186,7 @@ if __name__ == '__main__':
             os.makedirs(os.path.join(res_dir, batch["id"][jdx]),exist_ok=True)
             save_pdb(data_saved, path=os.path.join(res_dir, batch["id"][jdx],f'{batch["id"][jdx]}_gt.pdb'))
         
-        batch = recursive_to(batch, local_rank)    
+        batch = recursive_to(batch, args.device)    
         
         for sp_idx in tqdm(range(args.sample_num), desc="Generating Multiple Samples", dynamic_ncols=True):
             final = model.module.sample(batch, num_steps=100)
