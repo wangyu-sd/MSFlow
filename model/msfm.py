@@ -319,9 +319,9 @@ class MSFlowMatching(nn.Module):
         K = self._interpolant_cfg.seqs.num_classes
         k = self._interpolant_cfg.seqs.simplex_value
         # angle_mask_loss = torsions_mask.to(batch['aa'].device)
-        angle_mask_loss = batch['generate_mask'][..., None]
+        # angle_mask_loss = batch['generate_mask'][..., None]
 
-        batch['aa'][batch['generate_mask']] = 21
+        # batch['aa'][batch['generate_mask']] = 21
         #encode
         batch_fea = self.extract_fea(batch)
         rotmats_1, trans_1, crd_1, seqs_1, node_embed, edge_embed = \

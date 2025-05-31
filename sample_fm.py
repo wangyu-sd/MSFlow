@@ -78,6 +78,9 @@ if __name__ == '__main__':
     # parser.add_argument('--from_pretrain', type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-4ca134a]_2025_05_08__05_16_16/checkpoints/33778_last.pt")
     # parser.add_argument("--from_pretrain", type=str, default="/remote-home/wangyu/VQ-PAR/logs/learn_all[main-71aac24]_2025_05_22__09_49_20/checkpoints/25000.pt")
     parser.add_argument('--name', type=str, default='train_par')
+    parser.add_argument('--fix_seq', action='store_true', default=False, help='fix sequence')
+    parser.add_argument('--fix_bb', action='store_true', default=False, help='fix backbone')
+    parser.add_argument('--fix_crd', action='store_true', default=False, help='fix side-chain conf')
     parser.add_argument("--sample_num", type=int, default=64, help="number of samples")
     parser.add_argument("--sample_batch_size", type=int, default=32, help="batch size for sampling")
 
@@ -111,6 +114,9 @@ if __name__ == '__main__':
         #     log_dir = os.path.dirname(os.path.dirname(args.resume))
         # else:
         # log_dir = get_new_log_dir(args.logdir, prefix='%s[%s]' % (config_name, version_short), tag=args.tag)
+        args.tag = args.tag + "_fix_seq" if args.fix_seq else args.tag
+        args.tag = args.tag + "_fix_bb" if args.fix_bb else args.tag
+        args.tag = args.tag + "_fix_crd" if args.fix_crd else args.tag
         log_dir = args.resume.split('/')
         log_dir[-2] = log_dir[-2] + "_" + log_dir[-1][:-3] + args.tag
         log_dir[-1] = "sample"
@@ -196,7 +202,7 @@ if __name__ == '__main__':
         batch = recursive_to(batch, local_rank)    
         
         for sp_idx in tqdm(range(args.sample_num), desc="Generating Multiple Samples", dynamic_ncols=True):
-            final = model.module.sample(batch, num_steps=100)
+            final = model.module.sample(batch, num_steps=100, sample_bb=not args.fix_bb, sample_crd=not args.fix_crd, sample_seq=not args.fix_seq)
             final = final[-1]
             # final = model.anchor_based_infer(batch, cfg=0.0, top_k=5, top_p=0.0)
             # pos_ha,_,_ = full_atom_reconstruction(R_bb=final['rotmats'],t_bb=final['trans'],angles=final['angles'],aa=final['seqs_gt'])
